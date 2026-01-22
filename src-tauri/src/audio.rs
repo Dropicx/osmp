@@ -1,13 +1,14 @@
 use rodio::{Decoder, OutputStreamBuilder, Sink};
 use std::fs::File;
-use std::io::BufReader;
+use std::io::{Cursor, Read};
 use std::sync::mpsc::{channel, Sender, RecvTimeoutError};
 use std::time::Duration;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use std::thread;
 use std::time::Instant;
 use anyhow::{Context, Result};
+use crate::equalizer::{EqualizerSettings, EqualizerSource, bump_settings_version};
 
 // Commands sent to the audio thread
 pub enum AudioCommand {
@@ -16,6 +17,10 @@ pub enum AudioCommand {
     Stop,
     SetVolume(f32),
     Seek(f64), // Seek to position in seconds
+    SetEqBand { band: usize, gain_db: f32 },
+    SetEqEnabled(bool),
+    SetEqPreset { bands: [f32; 5], preamp: f32, name: String },
+    SetEqPreamp(f32),
 }
 
 // Shared state that can be read from any thread
@@ -23,14 +28,16 @@ pub struct AudioState {
     is_playing: AtomicBool,
     is_paused: AtomicBool,
     position_ms: AtomicU64,
+    pub eq_settings: Arc<RwLock<EqualizerSettings>>,
 }
 
 impl AudioState {
-    pub fn new() -> Self {
+    pub fn new(eq_settings: Arc<RwLock<EqualizerSettings>>) -> Self {
         AudioState {
             is_playing: AtomicBool::new(false),
             is_paused: AtomicBool::new(false),
             position_ms: AtomicU64::new(0),
+            eq_settings,
         }
     }
 
@@ -50,10 +57,11 @@ pub struct AudioController {
 }
 
 impl AudioController {
-    pub fn new() -> Result<Self> {
+    pub fn new(eq_settings: Arc<RwLock<EqualizerSettings>>) -> Result<Self> {
         let (sender, receiver) = channel::<AudioCommand>();
-        let state = Arc::new(AudioState::new());
+        let state = Arc::new(AudioState::new(Arc::clone(&eq_settings)));
         let thread_state = Arc::clone(&state);
+        let thread_eq_settings = Arc::clone(&eq_settings);
 
         // Spawn the audio thread
         thread::spawn(move || {
@@ -83,14 +91,23 @@ impl AudioController {
                                     sink.stop();
                                 }
 
-                                // Open and decode the file
-                                match File::open(&file_path) {
-                                    Ok(file) => {
-                                        match Decoder::new(BufReader::new(file)) {
+                                // Load entire file into memory, then decode
+                                match File::open(&file_path).and_then(|mut file| {
+                                    let mut buf = Vec::new();
+                                    file.read_to_end(&mut buf)?;
+                                    Ok(buf)
+                                }) {
+                                    Ok(buf) => {
+                                        match Decoder::new(Cursor::new(buf)) {
                                             Ok(source) => {
                                                 let sink = Sink::connect_new(&mixer);
                                                 sink.set_volume(current_volume);
-                                                sink.append(source);
+                                                // Wrap source with EQ
+                                                let eq_source = EqualizerSource::new(
+                                                    source,
+                                                    Arc::clone(&thread_eq_settings),
+                                                );
+                                                sink.append(eq_source);
                                                 sink.play();
 
                                                 current_sink = Some(sink);
@@ -104,7 +121,7 @@ impl AudioController {
                                             Err(e) => eprintln!("Failed to decode audio: {}", e),
                                         }
                                     }
-                                    Err(e) => eprintln!("Failed to open file: {}", e),
+                                    Err(e) => eprintln!("Failed to load file: {}", e),
                                 }
                             }
 
@@ -147,14 +164,49 @@ impl AudioController {
                             AudioCommand::Seek(position_secs) => {
                                 if let Some(ref sink) = current_sink {
                                     let seek_duration = Duration::from_secs_f64(position_secs);
-                                    // try_seek is fast native seeking
                                     let _ = sink.try_seek(seek_duration);
 
-                                    // Update position tracking
                                     paused_position_ms = (position_secs * 1000.0) as u64;
                                     playback_start = Some(Instant::now());
                                     thread_state.position_ms.store(paused_position_ms, Ordering::Relaxed);
                                 }
+                            }
+
+                            AudioCommand::SetEqBand { band, gain_db } => {
+                                if let Ok(mut settings) = thread_eq_settings.write() {
+                                    if band < 5 {
+                                        settings.bands[band].gain_db = gain_db.clamp(-12.0, 12.0);
+                                        settings.preset_name = "Custom".to_string();
+                                    }
+                                }
+                                bump_settings_version();
+                            }
+
+                            AudioCommand::SetEqEnabled(enabled) => {
+                                if let Ok(mut settings) = thread_eq_settings.write() {
+                                    settings.enabled = enabled;
+                                }
+                                bump_settings_version();
+                            }
+
+                            AudioCommand::SetEqPreset { bands, preamp, name } => {
+                                if let Ok(mut settings) = thread_eq_settings.write() {
+                                    for (i, &gain) in bands.iter().enumerate() {
+                                        if i < 5 {
+                                            settings.bands[i].gain_db = gain;
+                                        }
+                                    }
+                                    settings.preamp_db = preamp;
+                                    settings.preset_name = name;
+                                }
+                                bump_settings_version();
+                            }
+
+                            AudioCommand::SetEqPreamp(preamp_db) => {
+                                if let Ok(mut settings) = thread_eq_settings.write() {
+                                    settings.preamp_db = preamp_db.clamp(-12.0, 12.0);
+                                }
+                                bump_settings_version();
                             }
                         }
                     }
@@ -212,5 +264,25 @@ impl AudioController {
 
     pub fn seek(&self, position_secs: f64) {
         let _ = self.sender.send(AudioCommand::Seek(position_secs));
+    }
+
+    pub fn set_eq_band(&self, band: usize, gain_db: f32) {
+        let _ = self.sender.send(AudioCommand::SetEqBand { band, gain_db });
+    }
+
+    pub fn set_eq_enabled(&self, enabled: bool) {
+        let _ = self.sender.send(AudioCommand::SetEqEnabled(enabled));
+    }
+
+    pub fn set_eq_preset(&self, bands: [f32; 5], preamp: f32, name: String) {
+        let _ = self.sender.send(AudioCommand::SetEqPreset { bands, preamp, name });
+    }
+
+    pub fn set_eq_preamp(&self, preamp_db: f32) {
+        let _ = self.sender.send(AudioCommand::SetEqPreamp(preamp_db));
+    }
+
+    pub fn get_eq_settings(&self) -> EqualizerSettings {
+        self.state.eq_settings.read().unwrap().clone()
     }
 }

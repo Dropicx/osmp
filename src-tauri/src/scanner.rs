@@ -1,39 +1,189 @@
 use crate::database::Database;
-use crate::models::Track;
+use crate::models::{Track, ScanProgress, ScanResult, ScanError, ScanDiscovery};
 use lofty::prelude::{Accessor, AudioFile, TaggedFileExt};
 use lofty::read_from_path;
-use std::path::Path;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use std::time::Instant;
 use walkdir::WalkDir;
 use anyhow::Result;
 use std::fs;
+use tauri::Emitter;
 
-pub struct Scanner {
+const BATCH_SIZE: usize = 100;
+const AUDIO_EXTENSIONS: [&str; 8] = ["mp3", "flac", "ogg", "m4a", "wav", "aac", "opus", "wma"];
+
+/// Scanner with progress reporting, incremental scanning, batching, and cancellation support
+pub struct ScannerWithProgress {
     db: Database,
+    window: tauri::Window,
+    cancelled: Arc<AtomicBool>,
 }
 
-impl Scanner {
-    pub fn new(db: Database) -> Self {
-        Scanner { db }
+impl ScannerWithProgress {
+    pub fn new(db: Database, window: tauri::Window, cancelled: Arc<AtomicBool>) -> Self {
+        ScannerWithProgress { db, window, cancelled }
     }
 
-    pub fn scan_folders(&self, folders: Vec<String>) -> Result<Vec<Track>> {
-        let mut all_tracks = Vec::new();
-        let audio_extensions = ["mp3", "flac", "ogg", "m4a", "wav", "aac", "opus", "wma"];
+    /// Main scan entry point with all optimizations
+    pub fn scan_with_progress(&self, folders: Vec<String>) -> Result<ScanResult> {
+        let start_time = Instant::now();
 
-        for folder_path in folders {
-            if !Path::new(&folder_path).exists() {
+        // Reset cancellation flag at start of scan
+        self.cancelled.store(false, Ordering::SeqCst);
+
+        // 1. Collect all audio file paths first (fast pass)
+        let files = self.collect_audio_files(&folders);
+        let total_files = files.len();
+
+        // 2. Get existing files for incremental scanning
+        let existing_files = self.db.lock().unwrap()
+            .get_existing_file_info()
+            .unwrap_or_default();
+
+        // 3. Process files with progress reporting and batching
+        let mut scanned_count = 0;
+        let mut skipped_count = 0;
+        let mut error_count = 0;
+        let mut error_files: Vec<String> = Vec::new();
+        let mut batch: Vec<Track> = Vec::with_capacity(BATCH_SIZE);
+
+        for (index, path) in files.iter().enumerate() {
+            // Check for cancellation
+            if self.cancelled.load(Ordering::SeqCst) {
+                // Flush any remaining batch before returning
+                if !batch.is_empty() {
+                    let _ = self.db.lock().unwrap().insert_tracks_batch(&batch);
+                }
+
+                return Ok(ScanResult {
+                    total_files,
+                    scanned: scanned_count,
+                    skipped: skipped_count,
+                    errors: error_count,
+                    error_files,
+                    duration_secs: start_time.elapsed().as_secs_f64(),
+                    cancelled: true,
+                });
+            }
+
+            // Emit progress event
+            let progress = ScanProgress {
+                current_file: path.display().to_string(),
+                total_files,
+                processed_files: index,
+                is_complete: false,
+            };
+            let _ = self.window.emit("scan-progress", &progress);
+
+            // Check if file needs scanning (incremental)
+            if !self.should_scan_file(path, &existing_files) {
+                skipped_count += 1;
                 continue;
             }
 
-            for entry in WalkDir::new(&folder_path).into_iter().filter_map(|e| e.ok()) {
+            // Process file
+            match self.scan_file_for_batch(path) {
+                Ok(track) => {
+                    batch.push(track);
+                    scanned_count += 1;
+
+                    // Batch insert when batch is full
+                    if batch.len() >= BATCH_SIZE {
+                        if let Err(e) = self.db.lock().unwrap().insert_tracks_batch(&batch) {
+                            // Log batch error but continue
+                            eprintln!("Batch insert error: {}", e);
+                        }
+                        batch.clear();
+                    }
+                }
+                Err(e) => {
+                    error_count += 1;
+                    let error_msg = e.to_string();
+
+                    // Store all error files with their error messages
+                    error_files.push(format!("{}|{}", path.display(), error_msg));
+
+                    // Emit error event
+                    let scan_error = ScanError {
+                        file: path.display().to_string(),
+                        error: error_msg,
+                    };
+                    let _ = self.window.emit("scan-error", &scan_error);
+                }
+            }
+        }
+
+        // Insert remaining batch
+        if !batch.is_empty() {
+            if let Err(e) = self.db.lock().unwrap().insert_tracks_batch(&batch) {
+                eprintln!("Final batch insert error: {}", e);
+            }
+        }
+
+        let duration_secs = start_time.elapsed().as_secs_f64();
+
+        // Emit completion event
+        let completion = ScanProgress {
+            current_file: String::new(),
+            total_files,
+            processed_files: total_files,
+            is_complete: true,
+        };
+        let _ = self.window.emit("scan-progress", &completion);
+
+        Ok(ScanResult {
+            total_files,
+            scanned: scanned_count,
+            skipped: skipped_count,
+            errors: error_count,
+            error_files,
+            duration_secs,
+            cancelled: false,
+        })
+    }
+
+    /// Collect all audio files from folders (first pass - fast) with discovery events
+    fn collect_audio_files(&self, folders: &[String]) -> Vec<PathBuf> {
+        let mut files = Vec::new();
+        let mut last_emit = Instant::now();
+
+        for folder_path in folders {
+            if !Path::new(folder_path).exists() {
+                continue;
+            }
+
+            // Emit discovery start for this folder
+            let _ = self.window.emit("scan-discovery", ScanDiscovery {
+                files_found: files.len(),
+                current_folder: folder_path.clone(),
+                is_complete: false,
+            });
+
+            for entry in WalkDir::new(folder_path).into_iter().filter_map(|e| e.ok()) {
+                // Check for cancellation during discovery
+                if self.cancelled.load(Ordering::SeqCst) {
+                    return files;
+                }
+
                 let path = entry.path();
 
                 if path.is_file() {
                     if let Some(ext) = path.extension() {
                         let ext_lower = ext.to_string_lossy().to_lowercase();
-                        if audio_extensions.contains(&ext_lower.as_str()) {
-                            if let Ok(track) = self.scan_file(path) {
-                                all_tracks.push(track);
+                        if AUDIO_EXTENSIONS.contains(&ext_lower.as_str()) {
+                            files.push(path.to_path_buf());
+
+                            // Emit progress every 100ms to avoid flooding
+                            if last_emit.elapsed().as_millis() > 100 {
+                                let _ = self.window.emit("scan-discovery", ScanDiscovery {
+                                    files_found: files.len(),
+                                    current_folder: folder_path.clone(),
+                                    is_complete: false,
+                                });
+                                last_emit = Instant::now();
                             }
                         }
                     }
@@ -41,10 +191,35 @@ impl Scanner {
             }
         }
 
-        Ok(all_tracks)
+        // Emit discovery complete
+        let _ = self.window.emit("scan-discovery", ScanDiscovery {
+            files_found: files.len(),
+            current_folder: String::new(),
+            is_complete: true,
+        });
+
+        files
     }
 
-    fn scan_file(&self, path: &Path) -> Result<Track> {
+    /// Check if a file needs scanning (for incremental scan support)
+    fn should_scan_file(&self, path: &Path, existing: &HashMap<String, i64>) -> bool {
+        let path_str = path.to_string_lossy().to_string();
+
+        match existing.get(&path_str) {
+            None => true,  // New file - needs scanning
+            Some(&db_modified) => {
+                // Check if file was modified since last scan
+                let file_modified = fs::metadata(path)
+                    .and_then(|m| m.modified())
+                    .map(|t| t.duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64)
+                    .unwrap_or(0);
+                file_modified > db_modified
+            }
+        }
+    }
+
+    /// Scan a single file and return Track (doesn't insert into DB - that's done in batches)
+    fn scan_file_for_batch(&self, path: &Path) -> Result<Track> {
         let file_path = path.to_string_lossy().to_string();
         let metadata = fs::metadata(path)?;
         let file_size = metadata.len() as i64;
@@ -67,17 +242,17 @@ impl Scanner {
         let mut year = None;
         let mut genre = None;
         let mut track_number = None;
-        let mut duration = None;
+        let duration: Option<i64>;
 
         // Skip files that are likely sound effects based on path
         let path_str = file_path.to_lowercase();
         let skip_patterns = [
-            ".app/",           // macOS app bundles
-            "/library/sounds", // System sounds
-            "/sfx/",           // Sound effects folders
-            "/sounds/",        // Generic sounds folders
-            "/notification",   // Notification sounds
-            "/alert",          // Alert sounds
+            ".app/",
+            "/library/sounds",
+            "/sfx/",
+            "/sounds/",
+            "/notification",
+            "/alert",
         ];
 
         if skip_patterns.iter().any(|p| path_str.contains(p)) {
@@ -85,26 +260,49 @@ impl Scanner {
         }
 
         // Try to read metadata using lofty
-        if let Ok(tagged_file) = read_from_path(path) {
-            // Get duration from audio properties
-            let properties = tagged_file.properties();
-            let duration_secs = properties.duration().as_secs() as i64;
+        match read_from_path(path) {
+            Ok(tagged_file) => {
+                let properties = tagged_file.properties();
+                let duration_secs = properties.duration().as_secs() as i64;
 
-            // Skip files shorter than 30 seconds (likely sound effects)
-            if duration_secs < 30 {
-                return Err(anyhow::anyhow!("File too short (< 30s), likely a sound effect"));
+                // Skip files shorter than 30 seconds (likely sound effects)
+                if duration_secs < 30 {
+                    return Err(anyhow::anyhow!("File too short (< 30s), likely a sound effect"));
+                }
+
+                duration = Some(duration_secs);
+
+                if let Some(tag) = tagged_file.primary_tag().or_else(|| tagged_file.first_tag()) {
+                    title = tag.title().map(|s| s.to_string());
+                    artist = tag.artist().map(|s| s.to_string());
+                    album = tag.album().map(|s| s.to_string());
+                    year = tag.year().map(|y| y as i64);
+                    genre = tag.genre().map(|s| s.to_string());
+                    track_number = tag.track().map(|t| t as i64);
+                }
             }
+            Err(_) => {
+                // Lofty failed to read the file - estimate duration from file size
+                // Typical bitrates: MP3 ~128-320kbps, FLAC ~800-1400kbps
+                let estimated_bitrate = match extension.as_str() {
+                    "mp3" => 192_000,  // 192 kbps average
+                    "m4a" | "aac" => 192_000,
+                    "ogg" | "opus" => 160_000,
+                    "flac" => 900_000, // ~900 kbps average
+                    "wav" => 1_411_000, // CD quality
+                    "wma" => 192_000,
+                    _ => 192_000,
+                };
 
-            duration = Some(duration_secs);
+                // Duration = (file_size_bits) / bitrate
+                let estimated_duration = (file_size * 8) / estimated_bitrate;
 
-            // Get metadata from tags
-            if let Some(tag) = tagged_file.primary_tag().or_else(|| tagged_file.first_tag()) {
-                title = tag.title().map(|s| s.to_string());
-                artist = tag.artist().map(|s| s.to_string());
-                album = tag.album().map(|s| s.to_string());
-                year = tag.year().map(|y| y as i64);
-                genre = tag.genre().map(|s| s.to_string());
-                track_number = tag.track().map(|t| t as i64);
+                // Only use estimate if it seems reasonable (> 30 seconds)
+                if estimated_duration >= 30 {
+                    duration = Some(estimated_duration);
+                } else {
+                    return Err(anyhow::anyhow!("File too short or unreadable"));
+                }
             }
         }
 
@@ -115,8 +313,8 @@ impl Scanner {
             }
         }
 
-        let track = Track {
-            id: 0, // Will be set by database
+        Ok(Track {
+            id: 0,
             file_path,
             title,
             artist,
@@ -129,12 +327,8 @@ impl Scanner {
             file_format: extension,
             last_modified,
             metadata_fetched: false,
+            release_mbid: None,
             created_at: 0,
-        };
-
-        // Insert or update in database
-        self.db.lock().unwrap().insert_or_update_track(&track)?;
-
-        Ok(track)
+        })
     }
 }

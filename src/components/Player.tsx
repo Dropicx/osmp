@@ -1,7 +1,10 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { useStore } from '../store/useStore';
 import { invoke } from '@tauri-apps/api/core';
-import { Play, Pause, SkipBack, SkipForward, Volume2, Shuffle, Repeat, Repeat1 } from 'lucide-react';
+import { Play, Pause, SkipBack, SkipForward, Volume2, Shuffle, Repeat, Repeat1, MoreVertical, Pencil, Download, Image, Music2, Trash2 } from 'lucide-react';
+import EditMetadataModal from './EditMetadataModal';
+import AddToPlaylistMenu from './AddToPlaylistMenu';
+import type { Track, MetadataResult, CoverFetchResult } from '../types';
 
 export default function Player() {
   const {
@@ -21,6 +24,74 @@ export default function Player() {
   const [hoverTime, setHoverTime] = useState<number | null>(null);
   const [hoverPercent, setHoverPercent] = useState<number>(0);
   const progressBarRef = useRef<HTMLDivElement>(null);
+  const [showMenu, setShowMenu] = useState(false);
+  const [editingTrack, setEditingTrack] = useState<Track | null>(null);
+  const [addToPlaylistOpen, setAddToPlaylistOpen] = useState(false);
+  const [menuPosition, setMenuPosition] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const [fetchingMetadata, setFetchingMetadata] = useState(false);
+  const [fetchingCovers, setFetchingCovers] = useState(false);
+  const menuBtnRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  // Close menu on click outside
+  useEffect(() => {
+    if (!showMenu) return;
+    const handleClick = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node) &&
+          menuBtnRef.current && !menuBtnRef.current.contains(e.target as Node)) {
+        setShowMenu(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, [showMenu]);
+
+  const handleMenuToggle = () => {
+    if (!showMenu && menuBtnRef.current) {
+      const rect = menuBtnRef.current.getBoundingClientRect();
+      setMenuPosition({ x: rect.left, y: rect.top - 8 });
+    }
+    setShowMenu(!showMenu);
+  };
+
+  const handleFetchMetadata = async () => {
+    if (!currentTrack) return;
+    setShowMenu(false);
+    setFetchingMetadata(true);
+    try {
+      await invoke<MetadataResult[]>('fetch_metadata', { trackIds: [currentTrack.id], force: false });
+      await useStore.getState().refreshCurrentTrack();
+    } catch (error) {
+      console.error('Failed to fetch metadata:', error);
+    } finally {
+      setFetchingMetadata(false);
+    }
+  };
+
+  const handleFetchCovers = async () => {
+    if (!currentTrack) return;
+    setShowMenu(false);
+    setFetchingCovers(true);
+    try {
+      await invoke<CoverFetchResult[]>('fetch_covers', { trackIds: [currentTrack.id] });
+    } catch (error) {
+      console.error('Failed to fetch covers:', error);
+    } finally {
+      setFetchingCovers(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!currentTrack) return;
+    setShowMenu(false);
+    try {
+      await invoke('delete_track', { trackId: currentTrack.id });
+      useStore.getState().stopPlayback();
+      useStore.getState().loadTracks();
+    } catch (error) {
+      console.error('Failed to delete track:', error);
+    }
+  };
 
   const formatDuration = (seconds: number | null) => {
     if (seconds === null || seconds === undefined) return '0:00';
@@ -82,7 +153,15 @@ export default function Player() {
     <div className="bg-bg-elevated border-t border-bg-surface px-8 py-5 shadow-2xl">
       <div className="flex items-center justify-between gap-6">
         {/* Track Info */}
-        <div className="flex items-center gap-4 flex-1 min-w-0">
+        <div className="flex items-center gap-3 flex-1 min-w-0">
+          <button
+            ref={menuBtnRef}
+            onClick={handleMenuToggle}
+            className="btn-icon flex-shrink-0"
+            title="Track options"
+          >
+            <MoreVertical size={20} className="text-text-secondary" />
+          </button>
           <div className="min-w-0 flex-1">
             <p className="font-semibold text-text-primary truncate">{currentTrack.title || 'Unknown Title'}</p>
             <p className="text-sm text-text-tertiary truncate">{currentTrack.artist || 'Unknown Artist'}</p>
@@ -191,6 +270,78 @@ export default function Player() {
           <span className="w-12 text-right font-medium">{formatDuration(currentTrack.duration)}</span>
         </div>
       </div>
+
+      {/* Track Options Menu */}
+      {showMenu && (
+        <div
+          ref={menuRef}
+          className="fixed z-50 bg-bg-card border border-bg-surface rounded-xl shadow-2xl py-2 min-w-[180px]"
+          style={{ left: menuPosition.x, top: menuPosition.y, transform: 'translateY(-100%)' }}
+        >
+          <button
+            onClick={() => { setEditingTrack(currentTrack); setShowMenu(false); }}
+            className="w-full px-4 py-2 text-left text-text-primary hover:bg-bg-hover flex items-center gap-3 transition-colors"
+          >
+            <Pencil size={16} className="text-blue-400" />
+            Edit Metadata
+          </button>
+          <div className="h-px bg-bg-surface my-1" />
+          <button
+            onClick={handleFetchMetadata}
+            disabled={fetchingMetadata}
+            className="w-full px-4 py-2 text-left text-text-primary hover:bg-bg-hover flex items-center gap-3 transition-colors disabled:opacity-50"
+          >
+            <Download size={16} className="text-green-400" />
+            {fetchingMetadata ? 'Fetching...' : 'Fetch Metadata'}
+          </button>
+          <button
+            onClick={handleFetchCovers}
+            disabled={fetchingCovers}
+            className="w-full px-4 py-2 text-left text-text-primary hover:bg-bg-hover flex items-center gap-3 transition-colors disabled:opacity-50"
+          >
+            <Image size={16} className="text-purple-400" />
+            {fetchingCovers ? 'Fetching...' : 'Fetch Covers'}
+          </button>
+          <div className="h-px bg-bg-surface my-1" />
+          <button
+            onClick={() => { setAddToPlaylistOpen(true); setShowMenu(false); }}
+            className="w-full px-4 py-2 text-left text-text-primary hover:bg-bg-hover flex items-center gap-3 transition-colors"
+          >
+            <Music2 size={16} className="text-primary-500" />
+            Add to Playlist
+          </button>
+          <div className="h-px bg-bg-surface my-1" />
+          <button
+            onClick={handleDelete}
+            className="w-full px-4 py-2 text-left text-red-400 hover:bg-bg-hover flex items-center gap-3 transition-colors"
+          >
+            <Trash2 size={16} />
+            Delete
+          </button>
+        </div>
+      )}
+
+      {/* Edit Metadata Modal */}
+      {editingTrack && (
+        <EditMetadataModal
+          track={editingTrack}
+          onClose={() => setEditingTrack(null)}
+          onSaved={() => {
+            setEditingTrack(null);
+            useStore.getState().refreshCurrentTrack();
+          }}
+        />
+      )}
+
+      {/* Add to Playlist Menu */}
+      {currentTrack && (
+        <AddToPlaylistMenu
+          trackId={currentTrack.id}
+          isOpen={addToPlaylistOpen}
+          onClose={() => setAddToPlaylistOpen(false)}
+          position={menuPosition}
+        />
+      )}
     </div>
   );
 }

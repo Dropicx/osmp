@@ -28,4 +28,22 @@ anyhow = "1"
 thiserror = "1"
 urlencoding = "2"
 base64 = "0.22"
+dirs = "5"
+regex = "1"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+mpris-server = "0.9"
+zbus = "4"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-media-player = "0.3"
+objc2 = "0.6"
+objc2-foundation = "0.3"
+block2 = "0.6"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { version = "0.52", features = [
+    "Media",
+    "Foundation",
+] }
 
