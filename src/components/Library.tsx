@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useStore } from '../store/useStore';
-import { Play, Pause, MoreVertical, Download } from 'lucide-react';
+import { Play, Pause, Trash2, Download } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 
 export default function Library() {
@@ -20,7 +20,7 @@ export default function Library() {
 
   const handleFetchMetadata = async () => {
     if (selectedTracks.length === 0) return;
-    
+
     setFetchingMetadata(true);
     try {
       await invoke('fetch_metadata', { trackIds: selectedTracks, force: false });
@@ -30,6 +30,18 @@ export default function Library() {
       console.error('Failed to fetch metadata:', error);
     } finally {
       setFetchingMetadata(false);
+    }
+  };
+
+  const handleDeleteSelected = async () => {
+    if (selectedTracks.length === 0) return;
+
+    try {
+      await invoke('delete_tracks', { trackIds: selectedTracks });
+      await loadTracks();
+      clearSelection();
+    } catch (error) {
+      console.error('Failed to delete tracks:', error);
     }
   };
 
@@ -44,110 +56,129 @@ export default function Library() {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
-        <div className="text-gray-400">Loading tracks...</div>
+        <div className="text-text-tertiary">Loading tracks...</div>
       </div>
     );
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-bold">Your Library</h1>
+        <h1 className="text-3xl font-bold text-text-primary">Your Library</h1>
         {selectedTracks.length > 0 && (
-          <div className="flex items-center gap-4">
-            <span className="text-gray-400">{selectedTracks.length} selected</span>
+          <div className="flex items-center gap-3">
+            <span className="text-text-tertiary text-sm font-medium px-3 py-1.5 bg-bg-card rounded-lg">
+              {selectedTracks.length} selected
+            </span>
             <button
               onClick={handleFetchMetadata}
               disabled={fetchingMetadata}
-              className="px-4 py-2 bg-green-600 hover:bg-green-700 rounded-lg disabled:opacity-50 flex items-center gap-2"
+              className="btn-success flex items-center gap-2"
             >
               <Download size={16} />
               {fetchingMetadata ? 'Fetching...' : 'Fetch Metadata'}
             </button>
             <button
-              onClick={clearSelection}
-              className="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg"
+              onClick={handleDeleteSelected}
+              className="btn-danger flex items-center gap-2"
             >
-              Clear Selection
+              <Trash2 size={16} />
+              Delete
+            </button>
+            <button
+              onClick={clearSelection}
+              className="btn-tertiary"
+            >
+              Clear
             </button>
           </div>
         )}
       </div>
 
       {tracks.length === 0 ? (
-        <div className="flex flex-col items-center justify-center h-64 text-gray-400">
+        <div className="flex flex-col items-center justify-center h-64 text-text-tertiary">
           <p className="text-lg">No tracks found</p>
           <p className="text-sm mt-2">Add scan folders in Settings and scan for music</p>
         </div>
       ) : (
-        <div className="bg-gray-800 rounded-lg overflow-hidden">
+        <div className="bg-bg-card rounded-2xl overflow-hidden border border-bg-surface shadow-lg">
           <table className="w-full">
-            <thead className="bg-gray-900">
+            <thead className="bg-bg-elevated border-b border-bg-surface">
               <tr>
                 <th className="text-left p-4 w-12">
-                  <input
-                    type="checkbox"
-                    className="rounded"
-                    checked={selectedTracks.length === tracks.length && tracks.length > 0}
-                    onChange={(e) => {
-                      if (e.target.checked) {
-                        tracks.forEach(t => {
-                          if (!selectedTracks.includes(t.id)) {
-                            toggleTrackSelection(t.id);
-                          }
-                        });
-                      } else {
-                        clearSelection();
-                      }
-                    }}
-                  />
+                  <label className="custom-checkbox">
+                    <input
+                      type="checkbox"
+                      checked={selectedTracks.length === tracks.length && tracks.length > 0}
+                      onChange={(e) => {
+                        if (e.target.checked) {
+                          tracks.forEach(t => {
+                            if (!selectedTracks.includes(t.id)) {
+                              toggleTrackSelection(t.id);
+                            }
+                          });
+                        } else {
+                          clearSelection();
+                        }
+                      }}
+                    />
+                    <span className="checkmark"></span>
+                  </label>
                 </th>
-                <th className="text-left p-4 text-gray-400 font-normal w-12">#</th>
-                <th className="text-left p-4 text-gray-400 font-normal">Title</th>
-                <th className="text-left p-4 text-gray-400 font-normal">Artist</th>
-                <th className="text-left p-4 text-gray-400 font-normal">Album</th>
-                <th className="text-left p-4 text-gray-400 font-normal">Genre</th>
-                <th className="text-right p-4 text-gray-400 font-normal">Duration</th>
-                <th className="text-center p-4 text-gray-400 font-normal w-12"></th>
+                <th className="text-left p-4 text-text-tertiary font-medium text-sm w-12">#</th>
+                <th className="text-left p-4 text-text-tertiary font-medium text-sm">Title</th>
+                <th className="text-left p-4 text-text-tertiary font-medium text-sm">Artist</th>
+                <th className="text-left p-4 text-text-tertiary font-medium text-sm">Album</th>
+                <th className="text-left p-4 text-text-tertiary font-medium text-sm">Genre</th>
+                <th className="text-right p-4 text-text-tertiary font-medium text-sm">Duration</th>
+                <th className="text-center p-4 text-text-tertiary font-medium text-sm w-12"></th>
               </tr>
             </thead>
             <tbody>
               {tracks.map((track, index) => (
                 <tr
                   key={track.id}
-                  className={`hover:bg-gray-700 ${selectedTracks.includes(track.id) ? 'bg-gray-750' : ''}`}
+                  className={`hover:bg-bg-hover cursor-pointer transition-colors ${
+                    selectedTracks.includes(track.id) 
+                      ? 'bg-primary-600/10 border-l-2 border-l-primary-600' 
+                      : ''
+                  } ${currentTrack?.id === track.id ? 'bg-primary-600/5' : ''}`}
+                  onDoubleClick={() => playTrack(track.id)}
                 >
                   <td className="p-4">
-                    <input
-                      type="checkbox"
-                      className="rounded"
-                      checked={selectedTracks.includes(track.id)}
-                      onChange={() => toggleTrackSelection(track.id)}
-                      onClick={(e) => e.stopPropagation()}
-                    />
+                    <label className="custom-checkbox">
+                      <input
+                        type="checkbox"
+                        checked={selectedTracks.includes(track.id)}
+                        onChange={() => toggleTrackSelection(track.id)}
+                        onClick={(e) => e.stopPropagation()}
+                      />
+                      <span className="checkmark"></span>
+                    </label>
                   </td>
-                  <td className="p-4 text-gray-400">{index + 1}</td>
-                  <td className="p-4 font-medium">{track.title || 'Unknown Title'}</td>
-                  <td className="p-4 text-gray-400">{track.artist || 'Unknown Artist'}</td>
-                  <td className="p-4 text-gray-400">{track.album || 'Unknown Album'}</td>
-                  <td className="p-4 text-gray-400">{track.genre || '-'}</td>
-                  <td className="p-4 text-right text-gray-400">
+                  <td className="p-4 text-text-tertiary">{index + 1}</td>
+                  <td className="p-4 font-semibold text-text-primary">{track.title || 'Unknown Title'}</td>
+                  <td className="p-4 text-text-secondary">{track.artist || 'Unknown Artist'}</td>
+                  <td className="p-4 text-text-secondary">{track.album || 'Unknown Album'}</td>
+                  <td className="p-4 text-text-tertiary">{track.genre || '-'}</td>
+                  <td className="p-4 text-right text-text-tertiary font-medium">
                     {formatDuration(track.duration)}
                   </td>
                   <td className="p-4">
-                    <div className="flex items-center justify-center gap-2">
+                    <div className="flex items-center justify-center">
                       <button
-                        onClick={() => handlePlayPause(track.id)}
-                        className="p-2 hover:bg-gray-600 rounded-lg transition-colors"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handlePlayPause(track.id);
+                        }}
+                        className="btn-icon"
+                        title={currentTrack?.id === track.id && isPlaying ? "Pause" : "Play"}
                       >
                         {currentTrack?.id === track.id && isPlaying ? (
-                          <Pause size={16} />
+                          <Pause size={16} className="text-primary-500" />
                         ) : (
-                          <Play size={16} />
+                          <Play size={16} className="text-text-tertiary" />
                         )}
-                      </button>
-                      <button className="p-2 hover:bg-gray-600 rounded-lg transition-colors">
-                        <MoreVertical size={16} />
                       </button>
                     </div>
                   </td>

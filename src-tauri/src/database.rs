@@ -1,6 +1,5 @@
 use rusqlite::{Connection, Result as SqlResult, params};
-use crate::models::{Track, Album, Artist, ScanFolder, TrackFilters};
-use std::path::PathBuf;
+use crate::models::{Track, ScanFolder, TrackFilters};
 use anyhow::{Context, Result};
 use std::sync::{Arc, Mutex};
 
@@ -270,13 +269,61 @@ impl DatabaseInner {
         )
     }
 
-    pub fn update_track_metadata(&mut self, track_id: i64, title: Option<String>, artist: Option<String>, 
+    pub fn update_track_metadata(&mut self, track_id: i64, title: Option<String>, artist: Option<String>,
                                 album: Option<String>, year: Option<i64>, genre: Option<String>) -> SqlResult<()> {
         self.conn.execute(
             "UPDATE tracks SET title = ?1, artist = ?2, album = ?3, year = ?4, genre = ?5, metadata_fetched = 1
              WHERE id = ?6",
             params![title, artist, album, year, genre, track_id],
         )?;
+        Ok(())
+    }
+
+    /// Smart update that only updates fields with values, preserving existing data
+    pub fn update_track_metadata_smart(&mut self, track_id: i64, title: Option<String>, artist: Option<String>,
+                                       album: Option<String>, year: Option<i64>, genre: Option<String>) -> SqlResult<()> {
+        // Build dynamic update query - only update fields that have values
+        let mut updates = Vec::new();
+        let mut params: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+
+        if let Some(ref t) = title {
+            updates.push("title = ?");
+            params.push(Box::new(t.clone()));
+        }
+        if let Some(ref a) = artist {
+            updates.push("artist = ?");
+            params.push(Box::new(a.clone()));
+        }
+        if let Some(ref al) = album {
+            updates.push("album = ?");
+            params.push(Box::new(al.clone()));
+        }
+        if let Some(y) = year {
+            updates.push("year = ?");
+            params.push(Box::new(y));
+        }
+        if let Some(ref g) = genre {
+            updates.push("genre = ?");
+            params.push(Box::new(g.clone()));
+        }
+
+        if updates.is_empty() {
+            // Nothing to update, just mark as fetched
+            self.conn.execute(
+                "UPDATE tracks SET metadata_fetched = 1 WHERE id = ?",
+                params![track_id],
+            )?;
+        } else {
+            updates.push("metadata_fetched = 1");
+            let query = format!("UPDATE tracks SET {} WHERE id = ?", updates.join(", "));
+            params.push(Box::new(track_id));
+
+            self.conn.execute(
+                &query,
+                rusqlite::params_from_iter(params.iter().map(|p| p.as_ref())),
+            )?;
+        }
+
         Ok(())
     }
 
@@ -307,6 +354,18 @@ impl DatabaseInner {
 
     pub fn remove_scan_folder(&mut self, id: i64) -> SqlResult<()> {
         self.conn.execute("DELETE FROM scan_folders WHERE id = ?1", params![id])?;
+        Ok(())
+    }
+
+    pub fn delete_track(&mut self, id: i64) -> SqlResult<()> {
+        self.conn.execute("DELETE FROM tracks WHERE id = ?1", params![id])?;
+        Ok(())
+    }
+
+    pub fn delete_tracks(&mut self, ids: &[i64]) -> SqlResult<()> {
+        for id in ids {
+            self.conn.execute("DELETE FROM tracks WHERE id = ?1", params![id])?;
+        }
         Ok(())
     }
 }

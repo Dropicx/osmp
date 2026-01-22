@@ -1,13 +1,13 @@
 import { useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { ScanFolder } from '../types';
+import { open } from '@tauri-apps/plugin-dialog';
+import { ScanFolder, Track } from '../types';
 import { FolderPlus, Trash2, Play, Loader } from 'lucide-react';
 
 export default function Settings() {
   const [folders, setFolders] = useState<ScanFolder[]>([]);
   const [scanning, setScanning] = useState(false);
   const [scanProgress, setScanProgress] = useState('');
-  const [newFolderPath, setNewFolderPath] = useState('');
 
   useEffect(() => {
     loadFolders();
@@ -23,11 +23,17 @@ export default function Settings() {
   };
 
   const handleAddFolder = async () => {
-    if (!newFolderPath.trim()) return;
     try {
-      await invoke('add_scan_folder', { path: newFolderPath.trim() });
-      setNewFolderPath('');
-      await loadFolders();
+      const selected = await open({
+        directory: true,
+        multiple: false,
+        title: 'Select Music Folder'
+      });
+
+      if (selected && typeof selected === 'string') {
+        await invoke('add_scan_folder', { path: selected });
+        await loadFolders();
+      }
     } catch (error) {
       console.error('Failed to add folder:', error);
     }
@@ -46,12 +52,12 @@ export default function Settings() {
     setScanning(true);
     setScanProgress('Scanning folders...');
     try {
-      await invoke('scan_folders');
-      setScanProgress('Scan complete!');
+      const tracks = await invoke<Track[]>('scan_folders');
+      setScanProgress(`Scan complete! Found ${tracks.length} tracks.`);
       setTimeout(() => {
         setScanProgress('');
         setScanning(false);
-      }, 2000);
+      }, 3000);
     } catch (error) {
       console.error('Failed to scan:', error);
       setScanProgress('Scan failed');
@@ -62,17 +68,20 @@ export default function Settings() {
   return (
     <div className="space-y-8 max-w-4xl">
       <div>
-        <h1 className="text-3xl font-bold mb-2">Settings</h1>
-        <p className="text-gray-400">Manage your music library</p>
+        <h1 className="text-3xl font-bold mb-2 text-text-primary">Settings</h1>
+        <p className="text-text-tertiary">Manage your music library</p>
       </div>
 
-      <section className="bg-gray-800 rounded-lg p-6">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-xl font-semibold">Scan Folders</h2>
+      <section className="bg-bg-card rounded-2xl p-6 border border-bg-surface shadow-lg">
+        <div className="flex items-center justify-between mb-6">
+          <div>
+            <h2 className="text-xl font-semibold text-text-primary">Scan Folders</h2>
+            <p className="text-sm text-text-tertiary mt-1">Add folders to scan for music files</p>
+          </div>
           <button
             onClick={handleScan}
             disabled={scanning || folders.length === 0}
-            className="px-4 py-2 bg-green-600 hover:bg-green-700 rounded-lg disabled:opacity-50 flex items-center gap-2"
+            className="btn-success flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {scanning ? (
               <>
@@ -88,18 +97,10 @@ export default function Settings() {
           </button>
         </div>
 
-        <div className="mb-4 flex gap-2">
-          <input
-            type="text"
-            value={newFolderPath}
-            onChange={(e) => setNewFolderPath(e.target.value)}
-            onKeyPress={(e) => e.key === 'Enter' && handleAddFolder()}
-            placeholder="Enter folder path (e.g., /Users/username/Music)"
-            className="flex-1 bg-gray-900 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-white"
-          />
+        <div className="mb-4">
           <button
             onClick={handleAddFolder}
-            className="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg flex items-center gap-2"
+            className="btn-secondary flex items-center gap-2"
           >
             <FolderPlus size={16} />
             Add Folder
@@ -107,34 +108,45 @@ export default function Settings() {
         </div>
 
         {scanProgress && (
-          <div className="mb-4 p-3 bg-gray-700 rounded-lg text-sm">
+          <div className="mb-4 p-4 bg-primary-600/10 border border-primary-600/20 rounded-xl text-sm text-text-primary">
             {scanProgress}
           </div>
         )}
 
         {folders.length === 0 ? (
-          <div className="text-center py-8 text-gray-400">
-            <p>No scan folders configured</p>
-            <p className="text-sm mt-2">Click "Add Folder" to get started</p>
+          <div className="text-center py-12 text-text-tertiary">
+            <p className="text-lg mb-2">No scan folders configured</p>
+            <p className="text-sm">Click "Add Folder" to get started</p>
           </div>
         ) : (
-          <div className="space-y-2">
+          <div className="space-y-3">
             {folders.map((folder) => (
               <div
                 key={folder.id}
-                className="flex items-center justify-between p-4 bg-gray-900 rounded-lg"
+                className="flex items-center justify-between p-4 bg-bg-elevated rounded-xl border border-bg-surface hover:border-bg-hover transition-colors"
               >
-                <div className="flex-1">
-                  <p className="font-medium">{folder.path}</p>
-                  <p className="text-sm text-gray-400">
-                    {folder.enabled ? 'Enabled' : 'Disabled'}
+                <div className="flex-1 min-w-0">
+                  <p className="font-semibold text-text-primary truncate">{folder.path}</p>
+                  <p className="text-sm text-text-tertiary mt-1">
+                    {folder.enabled ? (
+                      <span className="inline-flex items-center gap-1.5">
+                        <span className="w-2 h-2 bg-success rounded-full"></span>
+                        Enabled
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1.5">
+                        <span className="w-2 h-2 bg-text-muted rounded-full"></span>
+                        Disabled
+                      </span>
+                    )}
                   </p>
                 </div>
                 <button
                   onClick={() => handleRemoveFolder(folder.id)}
-                  className="p-2 hover:bg-gray-700 rounded-lg transition-colors text-red-400"
+                  className="btn-icon text-danger hover:bg-danger/10 ml-4"
+                  title="Remove folder"
                 >
-                  <Trash2 size={16} />
+                  <Trash2 size={18} />
                 </button>
               </div>
             ))}
@@ -142,21 +154,22 @@ export default function Settings() {
         )}
       </section>
 
-      <section className="bg-gray-800 rounded-lg p-6">
-        <h2 className="text-xl font-semibold mb-4">Metadata</h2>
+      <section className="bg-bg-card rounded-2xl p-6 border border-bg-surface shadow-lg">
+        <h2 className="text-xl font-semibold mb-6 text-text-primary">Metadata</h2>
         <div className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium mb-2">
-              Auto-fetch metadata
+          <div className="flex items-start justify-between">
+            <div className="flex-1">
+              <label className="block text-sm font-semibold mb-2 text-text-primary">
+                Auto-fetch metadata
+              </label>
+              <p className="text-sm text-text-tertiary">
+                Automatically fetch metadata from MusicBrainz when scanning new tracks
+              </p>
+            </div>
+            <label className="toggle-switch ml-6 flex-shrink-0">
+              <input type="checkbox" defaultChecked={false} />
+              <span className="toggle-slider"></span>
             </label>
-            <p className="text-sm text-gray-400 mb-2">
-              Automatically fetch metadata from MusicBrainz when scanning new tracks
-            </p>
-            <input
-              type="checkbox"
-              className="rounded"
-              defaultChecked={false}
-            />
           </div>
         </div>
       </section>

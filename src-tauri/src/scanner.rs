@@ -1,5 +1,6 @@
 use crate::database::Database;
 use crate::models::Track;
+use lofty::prelude::{Accessor, AudioFile, TaggedFileExt};
 use lofty::read_from_path;
 use std::path::Path;
 use walkdir::WalkDir;
@@ -26,7 +27,7 @@ impl Scanner {
 
             for entry in WalkDir::new(&folder_path).into_iter().filter_map(|e| e.ok()) {
                 let path = entry.path();
-                
+
                 if path.is_file() {
                     if let Some(ext) = path.extension() {
                         let ext_lower = ext.to_string_lossy().to_lowercase();
@@ -59,7 +60,7 @@ impl Scanner {
             .unwrap_or("")
             .to_lowercase();
 
-        // Try to read metadata from file
+        // Initialize metadata fields
         let mut title = None;
         let mut artist = None;
         let mut album = None;
@@ -68,15 +69,46 @@ impl Scanner {
         let mut track_number = None;
         let mut duration = None;
 
-        // Try to read metadata using lofty - simplified for now
-        // Lofty API may vary by version, so we'll extract what we can
-        if let Ok(_tagged_file) = read_from_path(path) {
-            // For now, we'll skip metadata extraction from lofty
-            // and rely on metadata fetching API instead
-            // This can be enhanced later with proper lofty API usage
+        // Skip files that are likely sound effects based on path
+        let path_str = file_path.to_lowercase();
+        let skip_patterns = [
+            ".app/",           // macOS app bundles
+            "/library/sounds", // System sounds
+            "/sfx/",           // Sound effects folders
+            "/sounds/",        // Generic sounds folders
+            "/notification",   // Notification sounds
+            "/alert",          // Alert sounds
+        ];
+
+        if skip_patterns.iter().any(|p| path_str.contains(p)) {
+            return Err(anyhow::anyhow!("File in sound effects directory"));
         }
 
-        // If no title, try to extract from filename
+        // Try to read metadata using lofty
+        if let Ok(tagged_file) = read_from_path(path) {
+            // Get duration from audio properties
+            let properties = tagged_file.properties();
+            let duration_secs = properties.duration().as_secs() as i64;
+
+            // Skip files shorter than 30 seconds (likely sound effects)
+            if duration_secs < 30 {
+                return Err(anyhow::anyhow!("File too short (< 30s), likely a sound effect"));
+            }
+
+            duration = Some(duration_secs);
+
+            // Get metadata from tags
+            if let Some(tag) = tagged_file.primary_tag().or_else(|| tagged_file.first_tag()) {
+                title = tag.title().map(|s| s.to_string());
+                artist = tag.artist().map(|s| s.to_string());
+                album = tag.album().map(|s| s.to_string());
+                year = tag.year().map(|y| y as i64);
+                genre = tag.genre().map(|s| s.to_string());
+                track_number = tag.track().map(|t| t as i64);
+            }
+        }
+
+        // If no title found in tags, use filename
         if title.is_none() {
             if let Some(file_stem) = path.file_stem().and_then(|s| s.to_str()) {
                 title = Some(file_stem.to_string());

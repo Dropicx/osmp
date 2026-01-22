@@ -23,45 +23,45 @@ export default function Search() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-3xl font-bold mb-6">Search</h1>
+        <h1 className="text-3xl font-bold mb-6 text-text-primary">Search</h1>
         <form onSubmit={handleSearch} className="relative">
-          <SearchIcon className="absolute left-4 top-1/2 transform -translate-y-1/2 text-gray-400" size={20} />
+          <SearchIcon className="absolute left-5 top-1/2 transform -translate-y-1/2 text-text-tertiary" size={20} />
           <input
             type="text"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search for songs, artists, or albums..."
-            className="w-full bg-gray-800 rounded-full pl-12 pr-6 py-4 text-lg focus:outline-none focus:ring-2 focus:ring-white"
+            className="w-full bg-bg-card border border-bg-surface rounded-full pl-14 pr-6 py-4 text-lg text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500 transition-all"
           />
         </form>
       </div>
 
       {tracks.length > 0 && (
         <div>
-          <h2 className="text-xl font-semibold mb-4">Results</h2>
-          <div className="bg-gray-800 rounded-lg overflow-hidden">
+          <h2 className="text-xl font-semibold mb-4 text-text-primary">Results</h2>
+          <div className="bg-bg-card rounded-2xl overflow-hidden border border-bg-surface shadow-lg">
             <table className="w-full">
-              <thead className="bg-gray-900">
+              <thead className="bg-bg-elevated border-b border-bg-surface">
                 <tr>
-                  <th className="text-left p-4 text-gray-400 font-normal">#</th>
-                  <th className="text-left p-4 text-gray-400 font-normal">Title</th>
-                  <th className="text-left p-4 text-gray-400 font-normal">Artist</th>
-                  <th className="text-left p-4 text-gray-400 font-normal">Album</th>
-                  <th className="text-right p-4 text-gray-400 font-normal">Duration</th>
+                  <th className="text-left p-4 text-text-tertiary font-medium text-sm">#</th>
+                  <th className="text-left p-4 text-text-tertiary font-medium text-sm">Title</th>
+                  <th className="text-left p-4 text-text-tertiary font-medium text-sm">Artist</th>
+                  <th className="text-left p-4 text-text-tertiary font-medium text-sm">Album</th>
+                  <th className="text-right p-4 text-text-tertiary font-medium text-sm">Duration</th>
                 </tr>
               </thead>
               <tbody>
                 {tracks.map((track, index) => (
                   <tr
                     key={track.id}
-                    className="hover:bg-gray-700 cursor-pointer"
+                    className="hover:bg-bg-hover cursor-pointer transition-colors"
                     onClick={() => playTrack(track.id)}
                   >
-                    <td className="p-4 text-gray-400">{index + 1}</td>
-                    <td className="p-4 font-medium">{track.title || 'Unknown Title'}</td>
-                    <td className="p-4 text-gray-400">{track.artist || 'Unknown Artist'}</td>
-                    <td className="p-4 text-gray-400">{track.album || 'Unknown Album'}</td>
-                    <td className="p-4 text-right text-gray-400">
+                    <td className="p-4 text-text-tertiary">{index + 1}</td>
+                    <td className="p-4 font-semibold text-text-primary">{track.title || 'Unknown Title'}</td>
+                    <td className="p-4 text-text-secondary">{track.artist || 'Unknown Artist'}</td>
+                    <td className="p-4 text-text-secondary">{track.album || 'Unknown Album'}</td>
+                    <td className="p-4 text-right text-text-tertiary font-medium">
                       {formatDuration(track.duration)}
                     </td>
                   </tr>
@@ -73,8 +73,8 @@ export default function Search() {
       )}
 
       {query && tracks.length === 0 && (
-        <div className="text-center text-gray-400 py-12">
-          <p>No results found for "{query}"</p>
+        <div className="text-center text-text-tertiary py-12">
+          <p className="text-lg">No results found for "{query}"</p>
         </div>
       )}
     </div>
