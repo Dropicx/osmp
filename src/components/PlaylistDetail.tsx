@@ -1,10 +1,177 @@
-import { useEffect, useState, useCallback } from 'react';
-import { Play, Pause, Shuffle, Trash2, Music, X, GripVertical } from 'lucide-react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
+import { Play, Pause, Shuffle, Trash2, Music, X, GripVertical, List, ListPlus } from 'lucide-react';
 import { useStore } from '../store/useStore';
+import { formatDuration } from '../utils/formatting';
+import { useColumnResize } from '../hooks/useColumnResize';
+import { getCellContent } from '../utils/columns';
+import ColumnResizeHandle from './ColumnResizeHandle';
+import type { ColumnConfig, ContentColumnId } from '../types/columns';
+import {
+  DndContext,
+  closestCenter,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  DragEndEvent,
+} from '@dnd-kit/core';
+import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
+import type { Track } from '../types';
 
 interface PlaylistDetailProps {
   playlistId: number;
   onBack?: () => void;
+}
+
+interface SortableTrackRowProps {
+  track: Track;
+  index: number;
+  isSelected: boolean;
+  isCurrentTrack: boolean;
+  isPlaying: boolean;
+  onPlayPause: (trackId: number) => void;
+  onToggleSelection: (trackId: number) => void;
+  onRemove: (trackId: number) => void;
+  onContextMenu: (e: React.MouseEvent, trackId: number) => void;
+  onPlayTrack: (trackId: number) => void;
+  onAddToQueue: (trackIds: number[], position: 'next' | 'end') => void;
+  gridTemplate: string;
+  visibleColumns: ColumnConfig[];
+  getColumnWidth: (colId: ContentColumnId) => number;
+}
+
+function SortableTrackRow({
+  track,
+  index,
+  isSelected,
+  isCurrentTrack,
+  isPlaying,
+  onPlayPause,
+  onToggleSelection,
+  onRemove,
+  onContextMenu,
+  onPlayTrack,
+  onAddToQueue,
+  gridTemplate,
+  visibleColumns,
+}: SortableTrackRowProps) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: track.id,
+  });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+    zIndex: isDragging ? 50 : undefined,
+  };
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={{ ...style, gridTemplateColumns: gridTemplate }}
+      className={`grid items-center gap-2 px-4 py-3 hover:bg-bg-hover cursor-pointer transition-colors ${
+        isSelected ? 'bg-primary-600/10 border-l-2 border-l-primary-600' : ''
+      } ${isCurrentTrack ? 'bg-primary-600/5' : ''} ${
+        isDragging ? 'bg-bg-card shadow-lg rounded-lg' : ''
+      }`}
+      onDoubleClick={() => onPlayTrack(track.id)}
+      onContextMenu={(e) => onContextMenu(e, track.id)}
+    >
+      {/* Drag handle */}
+      <div
+        className="cursor-grab active:cursor-grabbing text-text-tertiary hover:text-text-secondary touch-none"
+        {...attributes}
+        {...listeners}
+      >
+        <GripVertical size={16} />
+      </div>
+
+      {/* Checkbox */}
+      <label className="custom-checkbox" onClick={(e) => e.stopPropagation()}>
+        <input
+          type="checkbox"
+          checked={isSelected}
+          onChange={() => onToggleSelection(track.id)}
+          onClick={(e) => e.stopPropagation()}
+        />
+        <span className="checkmark"></span>
+      </label>
+
+      {/* Index */}
+      <span className="text-text-tertiary text-sm">{index + 1}</span>
+
+      {/* Dynamic content columns */}
+      {visibleColumns.map((col) => (
+        <span
+          key={col.id}
+          className={`truncate ${
+            col.id === 'title'
+              ? 'font-semibold text-text-primary'
+              : col.id === 'duration'
+                ? 'text-right text-text-tertiary font-medium text-sm'
+                : col.id === 'genre'
+                  ? 'text-text-tertiary'
+                  : 'text-text-secondary'
+          }`}
+        >
+          {getCellContent(track, col.id)}
+        </span>
+      ))}
+
+      {/* Play/Pause */}
+      <button
+        onClick={(e) => {
+          e.stopPropagation();
+          onPlayPause(track.id);
+        }}
+        className="btn-icon"
+        title={isCurrentTrack && isPlaying ? 'Pause' : 'Play'}
+      >
+        {isCurrentTrack && isPlaying ? (
+          <Pause size={16} className="text-primary-500" />
+        ) : (
+          <Play size={16} className="text-text-tertiary" />
+        )}
+      </button>
+
+      {/* Queue buttons */}
+      <div className="flex items-center gap-1">
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onAddToQueue([track.id], 'end');
+          }}
+          className="btn-icon"
+          title="Add to Queue"
+        >
+          <List size={14} className="text-text-tertiary" />
+        </button>
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onAddToQueue([track.id], 'next');
+          }}
+          className="btn-icon"
+          title="Add Next to Queue"
+        >
+          <ListPlus size={14} className="text-text-tertiary" />
+        </button>
+      </div>
+
+      {/* Remove */}
+      <button
+        onClick={(e) => {
+          e.stopPropagation();
+          onRemove(track.id);
+        }}
+        className="btn-icon text-text-tertiary hover:text-red-400"
+        title="Remove from playlist"
+      >
+        <X size={16} />
+      </button>
+    </div>
+  );
 }
 
 export default function PlaylistDetail({ playlistId, onBack }: PlaylistDetailProps) {
@@ -23,12 +190,80 @@ export default function PlaylistDetail({ playlistId, onBack }: PlaylistDetailPro
     selectedTracks,
     toggleTrackSelection,
     clearSelection,
+    addToQueue,
   } = useStore();
 
-  const playlist = playlists.find(p => p.id === playlistId);
+  const playlist = playlists.find((p) => p.id === playlistId);
+  const { resizingColumn, startResize, visibleColumns, getColumnWidth } = useColumnResize();
   const [selectedTrackIds, setSelectedTrackIds] = useState<number[]>([]);
-  const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
-  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
+
+  const gridTemplate = useMemo(() => {
+    const contentCols = visibleColumns.map((col) => `${getColumnWidth(col.id)}px`).join(' ');
+    return `auto auto 2rem ${contentCols} 2.5rem 4rem 2.5rem`;
+  }, [visibleColumns, getColumnWidth]);
+  const [contextMenu, setContextMenu] = useState<{
+    x: number;
+    y: number;
+    trackId: number;
+  } | null>(null);
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: {
+        distance: 5,
+      },
+    })
+  );
+
+  // Close context menu on click outside, scroll, or Escape
+  useEffect(() => {
+    const handleClick = () => setContextMenu(null);
+    const handleScroll = () => setContextMenu(null);
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setContextMenu(null);
+    };
+
+    if (contextMenu) {
+      document.addEventListener('click', handleClick);
+      document.addEventListener('scroll', handleScroll, true);
+      document.addEventListener('keydown', handleKeyDown);
+      return () => {
+        document.removeEventListener('click', handleClick);
+        document.removeEventListener('scroll', handleScroll, true);
+        document.removeEventListener('keydown', handleKeyDown);
+      };
+    }
+  }, [contextMenu]);
+
+  // Adjust context menu position to stay on screen
+  const getContextMenuPosition = () => {
+    if (!contextMenu) return { left: 0, top: 0 };
+
+    const menuWidth = 180;
+    const menuHeight = 240;
+    const padding = 8;
+
+    let x = contextMenu.x;
+    let y = contextMenu.y;
+
+    if (x + menuWidth + padding > window.innerWidth) {
+      x = window.innerWidth - menuWidth - padding;
+    }
+    if (y + menuHeight + padding > window.innerHeight) {
+      y = window.innerHeight - menuHeight - padding;
+    }
+
+    return { left: x, top: y };
+  };
+
+  const handleContextMenu = (e: React.MouseEvent, trackId: number) => {
+    e.preventDefault();
+    if (!selectedTrackIds.includes(trackId)) {
+      clearSelection();
+      toggleTrackSelection(trackId);
+    }
+    setContextMenu({ x: e.clientX, y: e.clientY, trackId });
+  };
 
   useEffect(() => {
     if (playlistId) {
@@ -40,28 +275,24 @@ export default function PlaylistDetail({ playlistId, onBack }: PlaylistDetailPro
     setSelectedTrackIds(selectedTracks);
   }, [selectedTracks]);
 
-  const formatDuration = (seconds: number | null) => {
-    if (!seconds) return '0:00';
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins}:${secs.toString().padStart(2, '0')}`;
-  };
-
   const totalDuration = playlistTracks.reduce((sum, track) => sum + (track.duration || 0), 0);
 
-  const handlePlayPause = useCallback((trackId: number) => {
-    if (currentTrack?.id === trackId && isPlaying) {
-      pausePlayback();
-    } else {
-      playTrack(trackId);
-    }
-  }, [currentTrack?.id, isPlaying, pausePlayback, playTrack]);
+  const handlePlayPause = useCallback(
+    (trackId: number) => {
+      if (currentTrack?.id === trackId && isPlaying) {
+        pausePlayback();
+      } else {
+        playTrack(trackId);
+      }
+    },
+    [currentTrack?.id, isPlaying, pausePlayback, playTrack]
+  );
 
   const handleRemoveTrack = async (trackId: number) => {
     try {
       await removeTrackFromPlaylist(playlistId, trackId);
-    } catch (error) {
-      console.error('Failed to remove track:', error);
+    } catch {
+      /* silently handled */
       alert('Failed to remove track from playlist');
     }
   };
@@ -73,48 +304,33 @@ export default function PlaylistDetail({ playlistId, onBack }: PlaylistDetailPro
         await removeTrackFromPlaylist(playlistId, trackId);
       }
       clearSelection();
-    } catch (error) {
-      console.error('Failed to remove tracks:', error);
+    } catch {
+      /* silently handled */
       alert('Failed to remove tracks from playlist');
     }
   };
 
   const handleShufflePlay = async () => {
     if (playlistTracks.length === 0) return;
-    // Shuffle the tracks and play first one
     const shuffled = [...playlistTracks].sort(() => Math.random() - 0.5);
     if (shuffled.length > 0) {
       await playTrack(shuffled[0].id);
     }
   };
 
-  const handleDragStart = (index: number) => {
-    setDraggedIndex(index);
-  };
+  const handleDragEnd = async (event: DragEndEvent) => {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
 
-  const handleDragOver = (e: React.DragEvent, index: number) => {
-    e.preventDefault();
-    if (draggedIndex !== null && draggedIndex !== index) {
-      setDragOverIndex(index);
-    }
-  };
+    const oldIndex = playlistTracks.findIndex((t) => t.id === active.id);
+    const newIndex = playlistTracks.findIndex((t) => t.id === over.id);
 
-  const handleDragLeave = () => {
-    setDragOverIndex(null);
-  };
+    if (oldIndex === -1 || newIndex === -1) return;
 
-  const handleDrop = async (e: React.DragEvent, dropIndex: number) => {
-    e.preventDefault();
-    if (draggedIndex === null || draggedIndex === dropIndex) {
-      setDraggedIndex(null);
-      setDragOverIndex(null);
-      return;
-    }
-
-    // Calculate new positions
+    // Calculate new order
     const newTracks = [...playlistTracks];
-    const [draggedTrack] = newTracks.splice(draggedIndex, 1);
-    newTracks.splice(dropIndex, 0, draggedTrack);
+    const [movedTrack] = newTracks.splice(oldIndex, 1);
+    newTracks.splice(newIndex, 0, movedTrack);
 
     // Create position updates
     const trackPositions = newTracks.map((track, index) => ({
@@ -124,18 +340,9 @@ export default function PlaylistDetail({ playlistId, onBack }: PlaylistDetailPro
 
     try {
       await reorderPlaylistTracks(playlistId, trackPositions);
-    } catch (error) {
-      console.error('Failed to reorder tracks:', error);
-      alert('Failed to reorder tracks');
+    } catch {
+      /* silently handled */
     }
-
-    setDraggedIndex(null);
-    setDragOverIndex(null);
-  };
-
-  const handleDragEnd = () => {
-    setDraggedIndex(null);
-    setDragOverIndex(null);
   };
 
   if (playlistLoading) {
@@ -173,7 +380,8 @@ export default function PlaylistDetail({ playlistId, onBack }: PlaylistDetailPro
         <div className="flex-1">
           <h1 className="text-4xl font-bold mb-2 text-text-primary">{playlist.name}</h1>
           <p className="text-text-tertiary mb-4">
-            {playlist.track_count} track{playlist.track_count !== 1 ? 's' : ''} • {formatDuration(totalDuration)}
+            {playlist.track_count} track{playlist.track_count !== 1 ? 's' : ''} •{' '}
+            {formatDuration(totalDuration)}
           </p>
           <div className="flex gap-3">
             <button
@@ -207,10 +415,7 @@ export default function PlaylistDetail({ playlistId, onBack }: PlaylistDetailPro
           <span className="text-text-secondary text-sm font-medium">
             {selectedTrackIds.length} selected
           </span>
-          <button
-            onClick={handleRemoveSelected}
-            className="btn-danger flex items-center gap-2"
-          >
+          <button onClick={handleRemoveSelected} className="btn-danger flex items-center gap-2">
             <Trash2 size={16} />
             Remove
           </button>
@@ -229,121 +434,165 @@ export default function PlaylistDetail({ playlistId, onBack }: PlaylistDetailPro
         </div>
       ) : (
         <div className="flex-1 bg-bg-card rounded-2xl overflow-auto border border-bg-surface shadow-lg">
-          <table className="w-full">
-            <thead className="bg-bg-elevated border-b border-bg-surface sticky top-0 z-10">
-              <tr>
-                <th className="text-left p-4 w-12">
-                  <label className="custom-checkbox">
-                    <input
-                      type="checkbox"
-                      checked={selectedTrackIds.length === playlistTracks.length && playlistTracks.length > 0}
-                      onChange={(e) => {
-                        if (e.target.checked) {
-                          playlistTracks.forEach(t => {
-                            if (!selectedTrackIds.includes(t.id)) {
-                              toggleTrackSelection(t.id);
-                            }
-                          });
-                        } else {
-                          clearSelection();
-                        }
-                      }}
-                    />
-                    <span className="checkmark"></span>
-                  </label>
-                </th>
-                <th className="text-left p-4 text-text-tertiary font-medium text-sm w-8"></th>
-                <th className="text-left p-4 text-text-tertiary font-medium text-sm w-12">#</th>
-                <th className="text-left p-4 text-text-tertiary font-medium text-sm">Title</th>
-                <th className="text-left p-4 text-text-tertiary font-medium text-sm">Artist</th>
-                <th className="text-left p-4 text-text-tertiary font-medium text-sm">Album</th>
-                <th className="text-right p-4 text-text-tertiary font-medium text-sm">Duration</th>
-                <th className="text-center p-4 text-text-tertiary font-medium text-sm w-12"></th>
-                <th className="text-center p-4 text-text-tertiary font-medium text-sm w-12"></th>
-              </tr>
-            </thead>
-            <tbody>
-              {playlistTracks.map((track, index) => {
-                const isSelected = selectedTrackIds.includes(track.id);
-                const isCurrentTrack = currentTrack?.id === track.id;
-                const isDragging = draggedIndex === index;
-                const isDragOver = dragOverIndex === index;
+          {/* Header row */}
+          <div
+            className="grid items-center gap-2 px-4 py-3 bg-bg-elevated border-b border-bg-surface sticky top-0 z-10"
+            style={{ gridTemplateColumns: gridTemplate }}
+          >
+            <div className="w-4" />
+            <label className="custom-checkbox">
+              <input
+                type="checkbox"
+                checked={
+                  selectedTrackIds.length === playlistTracks.length && playlistTracks.length > 0
+                }
+                onChange={(e) => {
+                  if (e.target.checked) {
+                    playlistTracks.forEach((t) => {
+                      if (!selectedTrackIds.includes(t.id)) {
+                        toggleTrackSelection(t.id);
+                      }
+                    });
+                  } else {
+                    clearSelection();
+                  }
+                }}
+              />
+              <span className="checkmark"></span>
+            </label>
+            <span className="text-text-tertiary font-medium text-sm">#</span>
+            {visibleColumns.map((col) => (
+              <span
+                key={col.id}
+                className={`text-text-tertiary font-medium text-sm relative ${col.id === 'duration' ? 'text-right' : ''}`}
+              >
+                {col.label}
+                <ColumnResizeHandle
+                  columnId={col.id}
+                  isResizing={resizingColumn === col.id}
+                  onStartResize={startResize}
+                />
+              </span>
+            ))}
+            <span />
+            <span className="text-center text-text-tertiary font-medium text-sm">Queue</span>
+            <span />
+          </div>
 
-                return (
-                  <tr
+          {/* Sortable track rows */}
+          <DndContext
+            sensors={sensors}
+            collisionDetection={closestCenter}
+            onDragEnd={handleDragEnd}
+          >
+            <SortableContext
+              items={playlistTracks.map((t) => t.id)}
+              strategy={verticalListSortingStrategy}
+            >
+              <div className="divide-y divide-bg-surface/50">
+                {playlistTracks.map((track, index) => (
+                  <SortableTrackRow
                     key={track.id}
-                    className={`hover:bg-bg-hover cursor-pointer transition-colors ${
-                      isSelected ? 'bg-primary-600/10 border-l-2 border-l-primary-600' : ''
-                    } ${isCurrentTrack ? 'bg-primary-600/5' : ''} ${
-                      isDragging ? 'opacity-50' : ''
-                    } ${isDragOver ? 'border-t-2 border-t-primary-500' : ''}`}
-                    onDoubleClick={() => playTrack(track.id)}
-                    draggable
-                    onDragStart={() => handleDragStart(index)}
-                    onDragOver={(e) => handleDragOver(e, index)}
-                    onDragLeave={handleDragLeave}
-                    onDrop={(e) => handleDrop(e, index)}
-                    onDragEnd={handleDragEnd}
-                  >
-                    <td className="p-4">
-                      <div
-                        className="cursor-grab active:cursor-grabbing text-text-tertiary hover:text-text-secondary"
-                        onMouseDown={(e) => e.stopPropagation()}
-                      >
-                        <GripVertical size={16} />
-                      </div>
-                    </td>
-                    <td className="p-4">
-                      <label className="custom-checkbox" onClick={(e) => e.stopPropagation()}>
-                        <input
-                          type="checkbox"
-                          checked={isSelected}
-                          onChange={() => toggleTrackSelection(track.id)}
-                          onClick={(e) => e.stopPropagation()}
-                        />
-                        <span className="checkmark"></span>
-                      </label>
-                    </td>
-                    <td className="p-4 text-text-tertiary">{index + 1}</td>
-                    <td className="p-4 font-semibold text-text-primary">{track.title || 'Unknown Title'}</td>
-                    <td className="p-4 text-text-secondary">{track.artist || 'Unknown Artist'}</td>
-                    <td className="p-4 text-text-secondary">{track.album || 'Unknown Album'}</td>
-                    <td className="p-4 text-right text-text-tertiary font-medium">
-                      {formatDuration(track.duration)}
-                    </td>
-                    <td className="p-4">
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handlePlayPause(track.id);
-                        }}
-                        className="btn-icon"
-                        title={isCurrentTrack && isPlaying ? "Pause" : "Play"}
-                      >
-                        {isCurrentTrack && isPlaying ? (
-                          <Pause size={16} className="text-primary-500" />
-                        ) : (
-                          <Play size={16} className="text-text-tertiary" />
-                        )}
-                      </button>
-                    </td>
-                    <td className="p-4">
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleRemoveTrack(track.id);
-                        }}
-                        className="btn-icon text-text-tertiary hover:text-red-400"
-                        title="Remove from playlist"
-                      >
-                        <X size={16} />
-                      </button>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+                    track={track}
+                    index={index}
+                    isSelected={selectedTrackIds.includes(track.id)}
+                    isCurrentTrack={currentTrack?.id === track.id}
+                    isPlaying={isPlaying}
+                    onPlayPause={handlePlayPause}
+                    onToggleSelection={toggleTrackSelection}
+                    onRemove={handleRemoveTrack}
+                    onContextMenu={handleContextMenu}
+                    onPlayTrack={playTrack}
+                    onAddToQueue={addToQueue}
+                    gridTemplate={gridTemplate}
+                    visibleColumns={visibleColumns}
+                    getColumnWidth={getColumnWidth}
+                  />
+                ))}
+              </div>
+            </SortableContext>
+          </DndContext>
+        </div>
+      )}
+
+      {/* Context Menu */}
+      {contextMenu && (
+        <div
+          className="fixed z-50 bg-bg-card border border-bg-surface rounded-xl shadow-2xl py-2 min-w-[180px] animate-slide-up"
+          style={getContextMenuPosition()}
+          onClick={(e) => e.stopPropagation()}
+          role="menu"
+          aria-label="Track context menu"
+        >
+          <button
+            onClick={() => {
+              if (contextMenu) {
+                playTrack(contextMenu.trackId);
+              }
+              setContextMenu(null);
+            }}
+            className="w-full px-4 py-2 text-left text-text-primary hover:bg-bg-hover flex items-center gap-3 transition-colors"
+          >
+            <Play size={16} className="text-primary-500" />
+            Play
+          </button>
+          <div className="h-px bg-bg-surface my-1" />
+          <button
+            onClick={async () => {
+              if (contextMenu) {
+                const tracksToAdd =
+                  selectedTrackIds.length > 1 ? selectedTrackIds : [contextMenu.trackId];
+                await addToQueue(tracksToAdd, 'end');
+              }
+              setContextMenu(null);
+            }}
+            className="w-full px-4 py-2 text-left text-text-primary hover:bg-bg-hover flex items-center gap-3 transition-colors"
+          >
+            <List size={16} className="text-primary-500" />
+            Add to Queue
+            {selectedTrackIds.length > 1 && (
+              <span className="ml-auto text-xs text-text-tertiary">
+                ({selectedTrackIds.length})
+              </span>
+            )}
+          </button>
+          <button
+            onClick={async () => {
+              if (contextMenu) {
+                const tracksToAdd =
+                  selectedTrackIds.length > 1 ? selectedTrackIds : [contextMenu.trackId];
+                await addToQueue(tracksToAdd, 'next');
+              }
+              setContextMenu(null);
+            }}
+            className="w-full px-4 py-2 text-left text-text-primary hover:bg-bg-hover flex items-center gap-3 transition-colors"
+          >
+            <ListPlus size={16} className="text-primary-500" />
+            Add Next to Queue
+            {selectedTrackIds.length > 1 && (
+              <span className="ml-auto text-xs text-text-tertiary">
+                ({selectedTrackIds.length})
+              </span>
+            )}
+          </button>
+          <div className="h-px bg-bg-surface my-1" />
+          <button
+            onClick={async () => {
+              if (contextMenu) {
+                await handleRemoveTrack(contextMenu.trackId);
+              }
+              setContextMenu(null);
+            }}
+            className="w-full px-4 py-2 text-left text-red-400 hover:bg-bg-hover flex items-center gap-3 transition-colors"
+          >
+            <Trash2 size={16} />
+            Remove from Playlist
+            {selectedTrackIds.length > 1 && (
+              <span className="ml-auto text-xs text-text-tertiary">
+                ({selectedTrackIds.length})
+              </span>
+            )}
+          </button>
         </div>
       )}
     </div>

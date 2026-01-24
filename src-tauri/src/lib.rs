@@ -1,11 +1,13 @@
-mod models;
-mod database;
+pub mod models;
+pub mod database;
 mod scanner;
 mod metadata;
 mod audio;
 mod commands;
 mod media_controls;
 mod equalizer;
+pub mod error;
+pub mod playlist_io;
 
 #[cfg(target_os = "linux")]
 mod media_controls_mpris;
@@ -24,6 +26,7 @@ use std::sync::atomic::AtomicBool;
 use std::time::Instant;
 use tokio::sync::mpsc;
 use tauri::Emitter;
+use tracing::{info, warn, error};
 
 pub struct AppState {
     pub db: Database,
@@ -31,18 +34,41 @@ pub struct AppState {
     pub scan_cancelled: Arc<AtomicBool>,
     pub media_controls: Option<Arc<MediaControlsManager>>,
     pub media_control_event_sender: Option<mpsc::UnboundedSender<media_controls::MediaControlEvent>>,
+    pub http_client: reqwest::Client,
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Initialize structured logging
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("osmp_lib=info,warn"))
+        )
+        .with_target(false)
+        .init();
+
+    info!("OSMP starting up");
+
     // Initialize database once at startup
-    let db = Arc::new(Mutex::new(
-        DatabaseInner::new().expect("Failed to initialize database")
-    ));
+    let db = match DatabaseInner::new() {
+        Ok(db) => Arc::new(Mutex::new(db)),
+        Err(e) => {
+            error!("Failed to initialize database: {}", e);
+            eprintln!("FATAL: Failed to initialize database: {}", e);
+            std::process::exit(1);
+        }
+    };
 
     // Load EQ settings from database, or use defaults
     let eq_settings = {
-        let mut db_lock = db.lock().unwrap();
+        let db_lock = match db.lock() {
+            Ok(lock) => lock,
+            Err(e) => {
+                error!("Failed to lock database during initialization: {}", e);
+                std::process::exit(1);
+            }
+        };
         db_lock.load_eq_settings()
             .ok()
             .flatten()
@@ -51,7 +77,28 @@ pub fn run() {
     let eq_settings = Arc::new(RwLock::new(eq_settings));
 
     // Initialize audio controller once at startup
-    let audio = Arc::new(AudioController::new(Arc::clone(&eq_settings)).expect("Failed to initialize audio"));
+    let audio = match AudioController::new(Arc::clone(&eq_settings)) {
+        Ok(controller) => Arc::new(controller),
+        Err(e) => {
+            error!("Failed to initialize audio: {}", e);
+            eprintln!("FATAL: Failed to initialize audio system: {}", e);
+            std::process::exit(1);
+        }
+    };
+
+    // Initialize shared HTTP client (reuses connections)
+    let http_client = match reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(15))
+        .pool_max_idle_per_host(2)
+        .user_agent("OSMP/0.1.0 (https://github.com/Dropicx/osmp)")
+        .build()
+    {
+        Ok(client) => client,
+        Err(e) => {
+            error!("Failed to create HTTP client: {}", e);
+            std::process::exit(1);
+        }
+    };
 
     // Initialize scan cancellation flag
     let scan_cancelled = Arc::new(AtomicBool::new(false));
@@ -62,21 +109,37 @@ pub fn run() {
             (Some(Arc::new(manager)), Some(receiver))
         }
         Err(e) => {
-            eprintln!("Media controls not available: {}", e);
+            warn!("Media controls not available: {}", e);
             (None, None)
         }
     };
 
     let media_control_event_sender = media_controls.as_ref().map(|mc| mc.get_event_sender());
 
-    // Clone references for the event handler
+    // Clone references for the event handlers
     let audio_for_events = Arc::clone(&audio);
+    let audio_for_position = Arc::clone(&audio);
     let media_controls_for_events = media_controls.clone();
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .setup(move |app| {
+            // Push-based position updates: emit position every ~1s when playing
+            {
+                let app_handle = app.handle().clone();
+                let audio = audio_for_position;
+                tauri::async_runtime::spawn(async move {
+                    loop {
+                        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                        if audio.state.is_playing() {
+                            let position = audio.get_position();
+                            let _ = app_handle.emit("position-update", position);
+                        }
+                    }
+                });
+            }
+
             // Set up media control event handler
             if let Some(mut receiver) = media_control_receiver {
                 let app_handle = app.handle().clone();
@@ -85,13 +148,13 @@ pub fn run() {
                 tauri::async_runtime::spawn(async move {
                     let mut last_toggle = Instant::now() - std::time::Duration::from_secs(1);
                     while let Some(event) = receiver.recv().await {
-                        eprintln!("[MediaControls] Received event: {:?}", event);
+                        info!("[MediaControls] Received event: {:?}", event);
                         match event {
                             MediaControlEvent::Play | MediaControlEvent::Pause | MediaControlEvent::PlayPause => {
                                 // Debounce: ignore events within 300ms of last toggle
                                 let now = Instant::now();
                                 if now.duration_since(last_toggle) < std::time::Duration::from_millis(300) {
-                                    eprintln!("[MediaControls] Debounced, skipping");
+                                    info!("[MediaControls] Debounced, skipping");
                                     continue;
                                 }
 
@@ -124,7 +187,7 @@ pub fn run() {
 
                                     // Emit authoritative state to frontend
                                     let _ = app_handle.emit("playback-state-changed", new_is_playing);
-                                    eprintln!("[MediaControls] Toggled: new_is_playing={}", new_is_playing);
+                                    info!("[MediaControls] Toggled: new_is_playing={}", new_is_playing);
                                 }
                             }
                             MediaControlEvent::Next => {
@@ -145,12 +208,13 @@ pub fn run() {
             }
             Ok(())
         })
-        .manage(AppState { 
-            db, 
-            audio, 
+        .manage(AppState {
+            db,
+            audio,
             scan_cancelled,
             media_controls,
             media_control_event_sender,
+            http_client,
         })
         .invoke_handler(tauri::generate_handler![
             get_scan_folders,
@@ -196,7 +260,14 @@ pub fn run() {
             set_eq_preamp,
             get_eq_presets,
             save_eq_settings,
-            get_visualizer_data
+            get_visualizer_data,
+            set_playback_speed,
+            preload_next_track,
+            record_play_history,
+            get_play_history,
+            get_duplicates,
+            export_playlist_m3u,
+            import_playlist_m3u
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

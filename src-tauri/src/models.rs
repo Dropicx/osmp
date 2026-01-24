@@ -123,3 +123,19 @@ pub struct PlaylistTrack {
     pub track_id: i64,
     pub position: i64,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PlayHistoryEntry {
+    pub id: i64,
+    pub track_id: i64,
+    pub played_at: i64,
+    pub duration_listened: i64,
+    pub track: Option<Track>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct M3uEntry {
+    pub path: String,
+    pub title: Option<String>,
+    pub duration: Option<i64>,
+}

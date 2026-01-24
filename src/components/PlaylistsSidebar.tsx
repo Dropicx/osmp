@@ -16,7 +16,11 @@ export default function PlaylistsSidebar() {
     renamePlaylist,
   } = useStore();
   const [showCreateDialog, setShowCreateDialog] = useState(false);
-  const [contextMenu, setContextMenu] = useState<{ playlistId: number; x: number; y: number } | null>(null);
+  const [contextMenu, setContextMenu] = useState<{
+    playlistId: number;
+    x: number;
+    y: number;
+  } | null>(null);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editName, setEditName] = useState('');
 
@@ -39,8 +43,8 @@ export default function PlaylistsSidebar() {
     if (confirm('Are you sure you want to delete this playlist?')) {
       try {
         await deletePlaylist(playlistId);
-      } catch (error) {
-        console.error('Failed to delete playlist:', error);
+      } catch {
+        /* silently handled */
         alert('Failed to delete playlist');
       }
     }
@@ -48,14 +52,14 @@ export default function PlaylistsSidebar() {
   };
 
   const handleDuplicate = async (playlistId: number) => {
-    const playlist = playlists.find(p => p.id === playlistId);
+    const playlist = playlists.find((p) => p.id === playlistId);
     if (!playlist) return;
 
     const newName = `${playlist.name} (Copy)`;
     try {
       await duplicatePlaylist(playlistId, newName);
-    } catch (error) {
-      console.error('Failed to duplicate playlist:', error);
+    } catch {
+      /* silently handled */
       alert('Failed to duplicate playlist');
     }
     setContextMenu(null);
@@ -76,8 +80,8 @@ export default function PlaylistsSidebar() {
     try {
       await renamePlaylist(playlistId, editName.trim());
       setEditingId(null);
-    } catch (error) {
-      console.error('Failed to rename playlist:', error);
+    } catch {
+      /* silently handled */
       alert('Failed to rename playlist');
     }
   };
@@ -158,7 +162,8 @@ export default function PlaylistsSidebar() {
                         <div className="font-medium truncate">{playlist.name}</div>
                         <div className="text-xs text-text-tertiary">
                           {playlist.track_count} track{playlist.track_count !== 1 ? 's' : ''}
-                          {playlist.total_duration && ` • ${formatDuration(playlist.total_duration)}`}
+                          {playlist.total_duration &&
+                            ` • ${formatDuration(playlist.total_duration)}`}
                         </div>
                       </div>
                     </button>
@@ -178,10 +183,7 @@ export default function PlaylistsSidebar() {
 
       {contextMenu && (
         <>
-          <div
-            className="fixed inset-0 z-40"
-            onClick={() => setContextMenu(null)}
-          />
+          <div className="fixed inset-0 z-40" onClick={() => setContextMenu(null)} />
           <div
             className="fixed z-50 bg-bg-card border border-bg-surface rounded-lg shadow-xl py-1 min-w-[160px]"
             style={{
@@ -191,7 +193,7 @@ export default function PlaylistsSidebar() {
           >
             <button
               onClick={() => {
-                const playlist = playlists.find(p => p.id === contextMenu.playlistId);
+                const playlist = playlists.find((p) => p.id === contextMenu.playlistId);
                 if (playlist) handleStartRename(playlist);
               }}
               className="w-full text-left px-4 py-2 text-sm text-text-primary hover:bg-bg-hover flex items-center gap-2"
@@ -224,7 +226,7 @@ export default function PlaylistsSidebar() {
           await loadPlaylists();
           // Get the fresh playlists from the store after loading
           const freshPlaylists = useStore.getState().playlists;
-          const newPlaylist = freshPlaylists.find(p => p.id === playlistId);
+          const newPlaylist = freshPlaylists.find((p) => p.id === playlistId);
           if (newPlaylist) {
             setCurrentPlaylist(newPlaylist);
             await loadPlaylistTracks(newPlaylist.id);

@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react';
 import { useStore } from '../store/useStore';
 import { invoke } from '@tauri-apps/api/core';
-import { Music, Play } from 'lucide-react';
+import { Music, Play, List, ListPlus } from 'lucide-react';
+import { formatDuration } from '../utils/formatting';
+import { DEFAULT_TITLE, DEFAULT_ARTIST } from '../constants';
 
 interface AlbumDetailProps {
   albumName: string;
@@ -10,7 +12,8 @@ interface AlbumDetailProps {
 }
 
 function AlbumDetail({ albumName, artist, onBack }: AlbumDetailProps) {
-  const { albumTracks, albumLoading, loadAlbumTracks, playTrack, playAlbum } = useStore();
+  const { albumTracks, albumLoading, loadAlbumTracks, playTrack, playAlbum, addToQueue } =
+    useStore();
   const [coverArt, setCoverArt] = useState<string | null>(null);
 
   useEffect(() => {
@@ -19,13 +22,6 @@ function AlbumDetail({ albumName, artist, onBack }: AlbumDetailProps) {
       .then(setCoverArt)
       .catch(() => setCoverArt(null));
   }, [albumName, artist, loadAlbumTracks]);
-
-  const formatDuration = (seconds: number | null) => {
-    if (!seconds) return '0:00';
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins}:${secs.toString().padStart(2, '0')}`;
-  };
 
   const totalDuration = albumTracks.reduce((sum, track) => sum + (track.duration || 0), 0);
 
@@ -49,11 +45,7 @@ function AlbumDetail({ albumName, artist, onBack }: AlbumDetailProps) {
       <div className="flex gap-6">
         <div className="w-64 h-64 rounded-xl flex items-center justify-center flex-shrink-0 overflow-hidden">
           {coverArt ? (
-            <img
-              src={coverArt}
-              alt={albumName}
-              className="w-full h-full object-cover rounded-xl"
-            />
+            <img src={coverArt} alt={albumName} className="w-full h-full object-cover rounded-xl" />
           ) : (
             <div className="w-full h-full bg-gradient-to-br from-primary-600/20 to-accent-600/20 rounded-xl flex items-center justify-center">
               <Music size={64} className="text-primary-400" />
@@ -62,9 +54,10 @@ function AlbumDetail({ albumName, artist, onBack }: AlbumDetailProps) {
         </div>
         <div className="flex-1">
           <h1 className="text-4xl font-bold mb-2 text-text-primary">{albumName}</h1>
-          <p className="text-xl text-text-secondary mb-4">{artist || 'Unknown Artist'}</p>
+          <p className="text-xl text-text-secondary mb-4">{artist || DEFAULT_ARTIST}</p>
           <p className="text-text-tertiary mb-4">
-            {albumTracks.length} track{albumTracks.length !== 1 ? 's' : ''} • {formatDuration(totalDuration)}
+            {albumTracks.length} track{albumTracks.length !== 1 ? 's' : ''} •{' '}
+            {formatDuration(totalDuration)}
           </p>
           <button
             onClick={() => playAlbum(albumName, artist)}
@@ -83,6 +76,7 @@ function AlbumDetail({ albumName, artist, onBack }: AlbumDetailProps) {
               <th className="text-left p-4 text-text-tertiary font-medium text-sm w-12">#</th>
               <th className="text-left p-4 text-text-tertiary font-medium text-sm">Title</th>
               <th className="text-right p-4 text-text-tertiary font-medium text-sm">Duration</th>
+              <th className="text-center p-4 text-text-tertiary font-medium text-sm w-24">Queue</th>
             </tr>
           </thead>
           <tbody>
@@ -93,9 +87,35 @@ function AlbumDetail({ albumName, artist, onBack }: AlbumDetailProps) {
                 onDoubleClick={() => playTrack(track.id)}
               >
                 <td className="p-4 text-text-tertiary">{track.track_number || index + 1}</td>
-                <td className="p-4 font-semibold text-text-primary">{track.title || 'Unknown Title'}</td>
+                <td className="p-4 font-semibold text-text-primary">
+                  {track.title || DEFAULT_TITLE}
+                </td>
                 <td className="p-4 text-right text-text-tertiary font-medium">
                   {formatDuration(track.duration)}
+                </td>
+                <td className="p-4">
+                  <div className="flex items-center justify-center gap-1">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        addToQueue([track.id], 'end');
+                      }}
+                      className="btn-icon"
+                      title="Add to Queue"
+                    >
+                      <List size={14} className="text-text-tertiary" />
+                    </button>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        addToQueue([track.id], 'next');
+                      }}
+                      className="btn-icon"
+                      title="Add Next to Queue"
+                    >
+                      <ListPlus size={14} className="text-text-tertiary" />
+                    </button>
+                  </div>
                 </td>
               </tr>
             ))}
@@ -108,7 +128,10 @@ function AlbumDetail({ albumName, artist, onBack }: AlbumDetailProps) {
 
 export default function Albums() {
   const { albums, albumLoading, loadAlbums } = useStore();
-  const [selectedAlbum, setSelectedAlbum] = useState<{ name: string; artist: string | null } | null>(null);
+  const [selectedAlbum, setSelectedAlbum] = useState<{
+    name: string;
+    artist: string | null;
+  } | null>(null);
 
   useEffect(() => {
     loadAlbums();
@@ -175,12 +198,13 @@ export default function Albums() {
             <h3 className="font-semibold truncate text-text-primary" title={album.name}>
               {album.name}
             </h3>
-            <p className="text-sm text-text-tertiary truncate" title={album.artist || 'Unknown Artist'}>
-              {album.artist || 'Unknown Artist'}
+            <p
+              className="text-sm text-text-tertiary truncate"
+              title={album.artist || DEFAULT_ARTIST}
+            >
+              {album.artist || DEFAULT_ARTIST}
             </p>
-            {album.year && (
-              <p className="text-xs text-text-tertiary mt-1">{album.year}</p>
-            )}
+            {album.year && <p className="text-xs text-text-tertiary mt-1">{album.year}</p>}
           </div>
         ))}
       </div>

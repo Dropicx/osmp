@@ -3,8 +3,26 @@ use crate::models::MetadataResult;
 use anyhow::{Context, Result};
 use regex::Regex;
 use serde_json::Value;
+use std::sync::LazyLock;
 use std::time::Duration;
 use std::path::Path;
+
+
+// Pre-compiled regex patterns (compiled once, reused forever)
+static RE_QUOTE_SINGLE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"'([^']+)'").unwrap());
+static RE_QUOTE_DOUBLE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#""([^"]+)""#).unwrap());
+static RE_TIMESTAMP_PAREN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\(\d{4}[_-]\d{2}[_-]\d{2}[^)]*\)").unwrap());
+static RE_TIMESTAMP_BRACKET: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\[\d{4}[_-]\d{2}[_-]\d{2}[^\]]*\]").unwrap());
+static RE_TRACK_NUMBER: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\d{1,3}[\s._-]+").unwrap());
+static RE_NUMBERED_PARENS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"[\(\[]\d+[\)\]]").unwrap());
+static RE_QUALITY_BITRATE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)\(?\b(?:320|256|192|128)\s*(?:kbps|kbs)?\)?").unwrap());
+static RE_QUALITY_FORMAT: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)\(?\b(?:mp3|flac|wav|aac|m4a|HQ|LQ|HD)\)?").unwrap());
+static RE_SUFFIX_DASH: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)\s*[-_]\s*(?:official|video|audio|lyrics?|hd|hq)\s*$").unwrap());
+static RE_SUFFIX_PAREN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)\s*\((?:official|video|audio|lyrics?|hd|hq)[^)]*\)\s*$").unwrap());
+static RE_LONG_PAREN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\s*\([^)]{15,}\)\s*$").unwrap());
+static RE_LONG_BRACKET: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\s*\[[^\]]{15,}\]\s*$").unwrap());
+static RE_CLEAN_TRACK_NUM: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\d{1,3}[\s._-]+").unwrap());
+static RE_CLEAN_PAREN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\s*\([^)]{10,}\)\s*$").unwrap());
 
 pub struct MetadataFetcher {
     db: Database,
@@ -18,18 +36,15 @@ struct ParsedFilename {
 }
 
 impl MetadataFetcher {
-    pub fn new(db: Database) -> Self {
-        let client = reqwest::Client::builder()
-            .timeout(Duration::from_secs(10))
-            .build()
-            .unwrap();
-
+    pub fn with_client(db: Database, client: reqwest::Client) -> Self {
         MetadataFetcher { db, client }
     }
 
     pub async fn fetch_metadata_for_track(&self, track_id: i64) -> Result<MetadataResult> {
         let (existing_artist, existing_title, file_path) = {
-            let track = self.db.lock().unwrap().get_track_by_id(track_id)
+            let db = self.db.lock()
+                .map_err(|e| anyhow::anyhow!("Database lock poisoned: {}", e))?;
+            let track = db.get_track_by_id(track_id)
                 .context("Track not found")?;
 
             // Skip if already fetched and has good metadata
@@ -107,72 +122,30 @@ impl MetadataFetcher {
         let mut artist: Option<String> = None;
 
         // 1. Extract quoted text (likely the real title)
-        // Try regex patterns for various quote styles
-        let quote_patterns = [
-            r"'([^']+)'",           // 'Title'
-            r#""([^"]+)""#,         // "Title"
-        ];
-
-        for pattern in quote_patterns {
-            if let Ok(re) = Regex::new(pattern) {
-                if let Some(caps) = re.captures(&cleaned_title) {
-                    if let Some(m) = caps.get(1) {
-                        let extracted = m.as_str().trim().to_string();
-                        if extracted.len() >= 2 {
-                            quoted_title = Some(extracted);
-                            break;
-                        }
+        let quote_regexes: &[&LazyLock<Regex>] = &[&RE_QUOTE_SINGLE, &RE_QUOTE_DOUBLE];
+        for re in quote_regexes {
+            if let Some(caps) = re.captures(&cleaned_title) {
+                if let Some(m) = caps.get(1) {
+                    let extracted = m.as_str().trim().to_string();
+                    if extracted.len() >= 2 {
+                        quoted_title = Some(extracted);
+                        break;
                     }
                 }
             }
         }
 
-        // 2. Remove common garbage patterns using regex
-        // Timestamps: (2018_07_29 13_21_06 UTC) or (2018-07-29)
-        if let Ok(re) = Regex::new(r"\(\d{4}[_-]\d{2}[_-]\d{2}[^)]*\)") {
-            cleaned_title = re.replace_all(&cleaned_title, " ").to_string();
-        }
-
-        // Bracketed timestamps: [2018_07_29...]
-        if let Ok(re) = Regex::new(r"\[\d{4}[_-]\d{2}[_-]\d{2}[^\]]*\]") {
-            cleaned_title = re.replace_all(&cleaned_title, " ").to_string();
-        }
-
-        // Track numbers at start: 01 , 01-, 01., 001
-        if let Ok(re) = Regex::new(r"^\d{1,3}[\s._-]+") {
-            cleaned_title = re.replace(&cleaned_title, "").to_string();
-        }
-
-        // Numbered parentheses/brackets: (1), [2], etc.
-        if let Ok(re) = Regex::new(r"[\(\[]\d+[\)\]]") {
-            cleaned_title = re.replace_all(&cleaned_title, " ").to_string();
-        }
-
-        // Quality/format tags: (320kbps), (mp3), (HQ)
-        if let Ok(re) = Regex::new(r"(?i)\(?\b(?:320|256|192|128)\s*(?:kbps|kbs)?\)?") {
-            cleaned_title = re.replace_all(&cleaned_title, " ").to_string();
-        }
-        if let Ok(re) = Regex::new(r"(?i)\(?\b(?:mp3|flac|wav|aac|m4a|HQ|LQ|HD)\)?") {
-            cleaned_title = re.replace_all(&cleaned_title, " ").to_string();
-        }
-
-        // Common suffixes: - official, (official video), etc.
-        if let Ok(re) = Regex::new(r"(?i)\s*[-_]\s*(?:official|video|audio|lyrics?|hd|hq)\s*$") {
-            cleaned_title = re.replace(&cleaned_title, "").to_string();
-        }
-        if let Ok(re) = Regex::new(r"(?i)\s*\((?:official|video|audio|lyrics?|hd|hq)[^)]*\)\s*$") {
-            cleaned_title = re.replace(&cleaned_title, "").to_string();
-        }
-
-        // Long parenthetical at end (likely garbage)
-        if let Ok(re) = Regex::new(r"\s*\([^)]{15,}\)\s*$") {
-            cleaned_title = re.replace(&cleaned_title, "").to_string();
-        }
-
-        // Long brackets at end
-        if let Ok(re) = Regex::new(r"\s*\[[^\]]{15,}\]\s*$") {
-            cleaned_title = re.replace(&cleaned_title, "").to_string();
-        }
+        // 2. Remove common garbage patterns using pre-compiled regexes
+        cleaned_title = RE_TIMESTAMP_PAREN.replace_all(&cleaned_title, " ").to_string();
+        cleaned_title = RE_TIMESTAMP_BRACKET.replace_all(&cleaned_title, " ").to_string();
+        cleaned_title = RE_TRACK_NUMBER.replace(&cleaned_title, "").to_string();
+        cleaned_title = RE_NUMBERED_PARENS.replace_all(&cleaned_title, " ").to_string();
+        cleaned_title = RE_QUALITY_BITRATE.replace_all(&cleaned_title, " ").to_string();
+        cleaned_title = RE_QUALITY_FORMAT.replace_all(&cleaned_title, " ").to_string();
+        cleaned_title = RE_SUFFIX_DASH.replace(&cleaned_title, "").to_string();
+        cleaned_title = RE_SUFFIX_PAREN.replace(&cleaned_title, "").to_string();
+        cleaned_title = RE_LONG_PAREN.replace(&cleaned_title, "").to_string();
+        cleaned_title = RE_LONG_BRACKET.replace(&cleaned_title, "").to_string();
 
         // 3. Try to extract artist from common patterns
         let artist_patterns = [
@@ -216,8 +189,7 @@ impl MetadataFetcher {
 
         // 5. Remove quotes from cleaned title
         cleaned_title = cleaned_title
-            .replace('\'', "")
-            .replace('"', "")
+            .replace(['\'', '"'], "")
             .trim()
             .to_string();
 
@@ -231,17 +203,8 @@ impl MetadataFetcher {
     /// Simple title cleaning for existing metadata
     fn clean_title(&self, title: &str) -> String {
         let mut result = title.to_string();
-
-        // Remove track numbers at start
-        if let Ok(re) = Regex::new(r"^\d{1,3}[\s._-]+") {
-            result = re.replace(&result, "").to_string();
-        }
-
-        // Remove parenthetical garbage
-        if let Ok(re) = Regex::new(r"\s*\([^)]{10,}\)\s*$") {
-            result = re.replace(&result, "").to_string();
-        }
-
+        result = RE_CLEAN_TRACK_NUM.replace(&result, "").to_string();
+        result = RE_CLEAN_PAREN.replace(&result, "").to_string();
         result.trim().to_string()
     }
 
@@ -265,7 +228,6 @@ impl MetadataFetcher {
 
         let response = self.client
             .get(&url)
-            .header("User-Agent", "OSMP/0.1.0 (https://github.com/Dropicx/osmp)")
             .send()
             .await
             .context("Failed to fetch from MusicBrainz")?;
@@ -323,7 +285,9 @@ impl MetadataFetcher {
 
                 // Only update if we got useful data
                 if fetched_artist.is_some() || fetched_title.is_some() {
-                    self.db.lock().unwrap().update_track_metadata_smart(
+                    let mut db = self.db.lock()
+                        .map_err(|e| anyhow::anyhow!("Database lock poisoned: {}", e))?;
+                    db.update_track_metadata_smart(
                         track_id,
                         fetched_title.clone(),
                         fetched_artist.clone(),

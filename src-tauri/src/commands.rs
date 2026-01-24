@@ -4,28 +4,34 @@ use crate::metadata::MetadataFetcher;
 use crate::equalizer::{EqualizerSettings, EqPreset, get_presets, get_visualizer_levels};
 use crate::AppState;
 use crate::media_controls::{MediaMetadata, PlaybackState};
+use crate::database::DatabaseInner;
 use tauri::State;
-use std::sync::Arc;
+use std::sync::{Arc, MutexGuard};
 use std::sync::atomic::Ordering;
 use std::path::PathBuf;
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use lofty::prelude::*;
 
+/// Helper to lock the database mutex with a user-friendly error message
+fn lock_db(state: &AppState) -> Result<MutexGuard<'_, DatabaseInner>, String> {
+    state.db.lock().map_err(|e| format!("Database lock error: {}", e))
+}
+
 #[tauri::command]
 pub async fn get_scan_folders(state: State<'_, AppState>) -> Result<Vec<ScanFolder>, String> {
-    let result = state.db.lock().unwrap().get_scan_folders();
+    let result = lock_db(&state)?.get_scan_folders();
     result.map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 pub async fn add_scan_folder(state: State<'_, AppState>, path: String) -> Result<(), String> {
-    let result = state.db.lock().unwrap().add_scan_folder(&path);
+    let result = lock_db(&state)?.add_scan_folder(&path);
     result.map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 pub async fn remove_scan_folder(state: State<'_, AppState>, id: i64) -> Result<(), String> {
-    let result = state.db.lock().unwrap().remove_scan_folder(id);
+    let result = lock_db(&state)?.remove_scan_folder(id);
     result.map_err(|e| e.to_string())
 }
 
@@ -35,7 +41,7 @@ pub async fn scan_folders(state: State<'_, AppState>, window: tauri::Window) -> 
     let cancelled = Arc::clone(&state.scan_cancelled);
 
     let enabled_folders: Vec<String> = {
-        let folders = db.lock().unwrap().get_scan_folders().map_err(|e| e.to_string())?;
+        let folders = db.lock().map_err(|e| format!("Database lock error: {}", e))?.get_scan_folders().map_err(|e| e.to_string())?;
         folders
             .into_iter()
             .filter(|f| f.enabled)
@@ -63,19 +69,19 @@ pub async fn cancel_scan(state: State<'_, AppState>) -> Result<(), String> {
 
 #[tauri::command]
 pub async fn get_tracks(state: State<'_, AppState>, filters: Option<TrackFilters>) -> Result<Vec<Track>, String> {
-    let result = state.db.lock().unwrap().get_tracks(filters.as_ref());
+    let result = lock_db(&state)?.get_tracks(filters.as_ref());
     result.map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 pub async fn search_tracks(state: State<'_, AppState>, query: String) -> Result<Vec<Track>, String> {
-    let result = state.db.lock().unwrap().search_tracks(&query);
+    let result = lock_db(&state)?.search_tracks(&query);
     result.map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 pub async fn fetch_metadata(state: State<'_, AppState>, track_ids: Vec<i64>, _force: bool) -> Result<Vec<MetadataResult>, String> {
-    let fetcher = MetadataFetcher::new(Arc::clone(&state.db));
+    let fetcher = MetadataFetcher::with_client(Arc::clone(&state.db), state.http_client.clone());
 
     let mut results = Vec::new();
     for track_id in track_ids {
@@ -96,7 +102,7 @@ pub async fn fetch_metadata(state: State<'_, AppState>, track_ids: Vec<i64>, _fo
 pub async fn play_track(state: State<'_, AppState>, track_id: i64) -> Result<(), String> {
     // Get track info
     let (file_path, track, release_mbid) = {
-        let mut db = state.db.lock().unwrap();
+        let db = lock_db(&state)?;
         let track = db.get_track_by_id(track_id).map_err(|e| e.to_string())?;
         (track.file_path.clone(), track.clone(), track.release_mbid.clone())
     };
@@ -188,7 +194,8 @@ pub async fn stop_playback(state: State<'_, AppState>) -> Result<(), String> {
 
 #[tauri::command]
 pub async fn set_volume(state: State<'_, AppState>, volume: f32) -> Result<(), String> {
-    state.audio.set_volume(volume);
+    let clamped = volume.clamp(0.0, 1.0);
+    state.audio.set_volume(clamped);
     Ok(())
 }
 
@@ -199,25 +206,26 @@ pub async fn get_playback_position(state: State<'_, AppState>) -> Result<f64, St
 
 #[tauri::command]
 pub async fn seek_to_position(state: State<'_, AppState>, position: f64) -> Result<(), String> {
-    state.audio.seek(position);
-    
+    let clamped = if position < 0.0 { 0.0 } else { position };
+    state.audio.seek(clamped);
+
     // Update media controls position
     if let Some(ref media_controls) = state.media_controls {
-        let _ = media_controls.update_position(position);
+        let _ = media_controls.update_position(clamped);
     }
-    
+
     Ok(())
 }
 
 #[tauri::command]
 pub async fn delete_track(state: State<'_, AppState>, track_id: i64) -> Result<(), String> {
-    let result = state.db.lock().unwrap().delete_track(track_id);
+    let result = lock_db(&state)?.delete_track(track_id);
     result.map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 pub async fn delete_tracks(state: State<'_, AppState>, track_ids: Vec<i64>) -> Result<(), String> {
-    let result = state.db.lock().unwrap().delete_tracks(&track_ids);
+    let result = lock_db(&state)?.delete_tracks(&track_ids);
     result.map_err(|e| e.to_string())
 }
 
@@ -252,13 +260,11 @@ fn extract_embedded_cover(file_path: &str) -> Option<String> {
     Some(format!("data:{};base64,{}", mime_type, base64_data))
 }
 
-async fn fetch_cover_from_archive(release_mbid: &str) -> Option<Vec<u8>> {
+async fn fetch_cover_from_archive(client: &reqwest::Client, release_mbid: &str) -> Option<Vec<u8>> {
     let url = format!("https://coverartarchive.org/release/{}/front", release_mbid);
 
-    let client = reqwest::Client::new();
     let response = client
         .get(&url)
-        .header("User-Agent", "OSMP/0.1.0 (https://github.com/Dropicx/osmp)")
         .send()
         .await
         .ok()?;
@@ -273,7 +279,7 @@ async fn fetch_cover_from_archive(release_mbid: &str) -> Option<Vec<u8>> {
 #[tauri::command]
 pub async fn get_track_cover(state: State<'_, AppState>, track_id: i64) -> Result<Option<String>, String> {
     let (file_path, release_mbid) = {
-        let track = state.db.lock().unwrap().get_track_by_id(track_id).map_err(|e| e.to_string())?;
+        let track = lock_db(&state)?.get_track_by_id(track_id).map_err(|e| e.to_string())?;
         (track.file_path, track.release_mbid)
     };
 
@@ -295,7 +301,7 @@ pub async fn get_track_cover(state: State<'_, AppState>, track_id: i64) -> Resul
 
     // 3. Fetch from Cover Art Archive
     if let Some(ref mbid) = release_mbid {
-        if let Some(cover_data) = fetch_cover_from_archive(mbid).await {
+        if let Some(cover_data) = fetch_cover_from_archive(&state.http_client, mbid).await {
             // Cache it for future use
             let _ = save_cover_to_cache(mbid, &cover_data);
             let base64_data = BASE64.encode(&cover_data);
@@ -314,7 +320,7 @@ pub async fn fetch_covers(state: State<'_, AppState>, track_ids: Vec<i64>) -> Re
 
     for track_id in track_ids {
         let (file_path, release_mbid, title) = {
-            match state.db.lock().unwrap().get_track_by_id(track_id) {
+            match lock_db(&state)?.get_track_by_id(track_id) {
                 Ok(track) => (track.file_path, track.release_mbid, track.title),
                 Err(_) => {
                     results.push(CoverFetchResult {
@@ -352,7 +358,7 @@ pub async fn fetch_covers(state: State<'_, AppState>, track_ids: Vec<i64>) -> Re
 
         // 3. Try to fetch from Cover Art Archive
         if let Some(ref mbid) = release_mbid {
-            if let Some(cover_data) = fetch_cover_from_archive(mbid).await {
+            if let Some(cover_data) = fetch_cover_from_archive(&state.http_client, mbid).await {
                 let _ = save_cover_to_cache(mbid, &cover_data);
                 results.push(CoverFetchResult {
                     track_id,
@@ -381,49 +387,23 @@ pub async fn fetch_covers(state: State<'_, AppState>, track_ids: Vec<i64>) -> Re
 
 #[tauri::command]
 pub async fn get_albums(state: State<'_, AppState>) -> Result<Vec<AlbumInfo>, String> {
-    let album_data = state.db.lock().unwrap().get_albums().map_err(|e| e.to_string())?;
-    
-    let mut albums = Vec::new();
-    for (album_name, artist, year, track_count, total_duration, created_at) in album_data {
-        // Get cover art for this album - find a track and get its cover
-        // First, get the track info while holding the lock, then drop the lock before async operations
-        let (file_path, release_mbid) = {
-            let mut db = state.db.lock().unwrap();
-            let track_id = db.get_album_first_track_id(&album_name, artist.as_deref())
-                .map_err(|e| e.to_string())?;
-            
-            if let Some(id) = track_id {
-                let track = db.get_track_by_id(id).map_err(|e| e.to_string())?;
-                (Some(track.file_path), track.release_mbid)
-            } else {
-                (None, None)
-            }
-        };
-        
-        // Now we can do async operations without holding the lock
+    // Single query returns album info with first track's file_path and release_mbid
+    let album_data = lock_db(&state)?.get_albums_with_cover_info().map_err(|e| e.to_string())?;
+
+    let albums = album_data.into_iter().map(|(album_name, artist, year, track_count, total_duration, created_at, file_path, release_mbid)| {
+        // Only check local sources (embedded art + cached covers) - no network fetches
         let cover_art = if let Some(ref path) = file_path {
-            // Try embedded first
             if let Some(cover) = extract_embedded_cover(path) {
                 Some(cover)
             } else if let Some(ref mbid) = release_mbid {
-                // Try cached
                 let cache_path = get_cached_cover_path(mbid);
                 if cache_path.exists() {
-                    if let Ok(data) = std::fs::read(&cache_path) {
+                    std::fs::read(&cache_path).ok().map(|data| {
                         let base64_data = BASE64.encode(&data);
-                        Some(format!("data:image/jpeg;base64,{}", base64_data))
-                    } else {
-                        None
-                    }
+                        format!("data:image/jpeg;base64,{}", base64_data)
+                    })
                 } else {
-                    // Try fetching from archive (this is async, so lock is already dropped)
-                    if let Some(cover_data) = fetch_cover_from_archive(mbid).await {
-                        let _ = save_cover_to_cache(mbid, &cover_data);
-                        let base64_data = BASE64.encode(&cover_data);
-                        Some(format!("data:image/jpeg;base64,{}", base64_data))
-                    } else {
-                        None
-                    }
+                    None
                 }
             } else {
                 None
@@ -432,7 +412,7 @@ pub async fn get_albums(state: State<'_, AppState>) -> Result<Vec<AlbumInfo>, St
             None
         };
 
-        albums.push(AlbumInfo {
+        AlbumInfo {
             name: album_name,
             artist,
             year,
@@ -440,9 +420,9 @@ pub async fn get_albums(state: State<'_, AppState>) -> Result<Vec<AlbumInfo>, St
             total_duration,
             created_at,
             cover_art,
-        });
-    }
-    
+        }
+    }).collect();
+
     Ok(albums)
 }
 
@@ -452,7 +432,7 @@ pub async fn get_album_tracks(
     album_name: String,
     artist: Option<String>,
 ) -> Result<Vec<Track>, String> {
-    let tracks = state.db.lock().unwrap()
+    let tracks = lock_db(&state)?
         .get_album_tracks(&album_name, artist.as_deref())
         .map_err(|e| e.to_string())?;
     Ok(tracks)
@@ -465,7 +445,7 @@ pub async fn get_album_cover(
     artist: Option<String>,
 ) -> Result<Option<String>, String> {
     // Find first track in album (prefer one with release_mbid)
-    let track_id = state.db.lock().unwrap()
+    let track_id = lock_db(&state)?
         .get_album_first_track_id(&album_name, artist.as_deref())
         .map_err(|e| e.to_string())?;
 
@@ -483,7 +463,7 @@ pub async fn play_album(
     album_name: String,
     artist: Option<String>,
 ) -> Result<(), String> {
-    let tracks = state.db.lock().unwrap()
+    let tracks = lock_db(&state)?
         .get_album_tracks(&album_name, artist.as_deref())
         .map_err(|e| e.to_string())?;
 
@@ -509,7 +489,7 @@ pub async fn update_track_metadata_manual(
     genre: Option<String>,
     track_number: Option<i64>,
 ) -> Result<(), String> {
-    state.db.lock().unwrap()
+    lock_db(&state)?
         .update_track_metadata_manual(track_id, title, artist, album, year, genre, track_number)
         .map_err(|e| e.to_string())
 }
@@ -529,7 +509,7 @@ pub async fn write_metadata_to_file(
     use lofty::config::WriteOptions;
 
     let file_path = {
-        let track = state.db.lock().unwrap()
+        let track = lock_db(&state)?
             .get_track_by_id(track_id)
             .map_err(|e| e.to_string())?;
         track.file_path
@@ -542,7 +522,8 @@ pub async fn write_metadata_to_file(
     // Get or create primary tag
     let has_primary = tagged_file.primary_tag().is_some();
     let tag = if has_primary {
-        tagged_file.primary_tag_mut().unwrap()
+        tagged_file.primary_tag_mut()
+            .ok_or_else(|| "Primary tag not found in file".to_string())?
     } else {
         tagged_file.first_tag_mut()
             .ok_or_else(|| "No tag found in file".to_string())?
@@ -581,13 +562,13 @@ pub async fn create_playlist(state: State<'_, AppState>, name: String) -> Result
     if name.trim().is_empty() {
         return Err("Playlist name cannot be empty".to_string());
     }
-    let result = state.db.lock().unwrap().create_playlist(&name);
+    let result = lock_db(&state)?.create_playlist(&name);
     result.map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 pub async fn delete_playlist(state: State<'_, AppState>, id: i64) -> Result<(), String> {
-    let result = state.db.lock().unwrap().delete_playlist(id);
+    let result = lock_db(&state)?.delete_playlist(id);
     result.map_err(|e| e.to_string())
 }
 
@@ -596,25 +577,25 @@ pub async fn rename_playlist(state: State<'_, AppState>, id: i64, new_name: Stri
     if new_name.trim().is_empty() {
         return Err("Playlist name cannot be empty".to_string());
     }
-    let result = state.db.lock().unwrap().rename_playlist(id, &new_name);
+    let result = lock_db(&state)?.rename_playlist(id, &new_name);
     result.map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 pub async fn get_playlists(state: State<'_, AppState>) -> Result<Vec<Playlist>, String> {
-    let result = state.db.lock().unwrap().get_playlists();
+    let result = lock_db(&state)?.get_playlists();
     result.map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 pub async fn get_playlist(state: State<'_, AppState>, id: i64) -> Result<Playlist, String> {
-    let result = state.db.lock().unwrap().get_playlist(id);
+    let result = lock_db(&state)?.get_playlist(id);
     result.map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 pub async fn get_playlist_tracks(state: State<'_, AppState>, playlist_id: i64) -> Result<Vec<Track>, String> {
-    let result = state.db.lock().unwrap().get_playlist_tracks(playlist_id);
+    let result = lock_db(&state)?.get_playlist_tracks(playlist_id);
     result.map_err(|e| e.to_string())
 }
 
@@ -625,8 +606,11 @@ pub async fn add_track_to_playlist(
     track_id: i64,
     position: Option<i64>,
 ) -> Result<(), String> {
-    let result = state.db.lock().unwrap().add_track_to_playlist(playlist_id, track_id, position);
-    result.map_err(|e| e.to_string())
+    // Validate playlist and track exist
+    let mut db = lock_db(&state)?;
+    db.get_playlist(playlist_id).map_err(|_| format!("Playlist {} not found", playlist_id))?;
+    db.get_track_by_id(track_id).map_err(|_| format!("Track {} not found", track_id))?;
+    db.add_track_to_playlist(playlist_id, track_id, position).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -635,17 +619,8 @@ pub async fn add_tracks_to_playlist(
     playlist_id: i64,
     track_ids: Vec<i64>,
 ) -> Result<(), String> {
-    let mut db = state.db.lock().unwrap();
-    // Get current max position by querying existing tracks
-    let existing_tracks = db.get_playlist_tracks(playlist_id).map_err(|e| e.to_string())?;
-    let start_position = existing_tracks.len() as i64;
-    
-    // Add all tracks in a transaction
-    for (index, track_id) in track_ids.iter().enumerate() {
-        db.add_track_to_playlist(playlist_id, *track_id, Some(start_position + index as i64))
-            .map_err(|e| e.to_string())?;
-    }
-    Ok(())
+    lock_db(&state)?.add_tracks_to_playlist_batch(playlist_id, &track_ids)
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -654,7 +629,7 @@ pub async fn remove_track_from_playlist(
     playlist_id: i64,
     track_id: i64,
 ) -> Result<(), String> {
-    let result = state.db.lock().unwrap().remove_track_from_playlist(playlist_id, track_id);
+    let result = lock_db(&state)?.remove_track_from_playlist(playlist_id, track_id);
     result.map_err(|e| e.to_string())
 }
 
@@ -664,7 +639,7 @@ pub async fn reorder_playlist_tracks(
     playlist_id: i64,
     track_positions: Vec<(i64, i64)>,
 ) -> Result<(), String> {
-    let result = state.db.lock().unwrap().reorder_playlist_tracks(playlist_id, track_positions);
+    let result = lock_db(&state)?.reorder_playlist_tracks(playlist_id, track_positions);
     result.map_err(|e| e.to_string())
 }
 
@@ -677,13 +652,13 @@ pub async fn duplicate_playlist(
     if new_name.trim().is_empty() {
         return Err("Playlist name cannot be empty".to_string());
     }
-    let result = state.db.lock().unwrap().duplicate_playlist(playlist_id, &new_name);
+    let result = lock_db(&state)?.duplicate_playlist(playlist_id, &new_name);
     result.map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 pub async fn play_playlist(state: State<'_, AppState>, playlist_id: i64) -> Result<(), String> {
-    let tracks = state.db.lock().unwrap()
+    let tracks = lock_db(&state)?
         .get_playlist_tracks(playlist_id)
         .map_err(|e| e.to_string())?;
 
@@ -709,6 +684,9 @@ pub async fn get_eq_settings(state: State<'_, AppState>) -> Result<EqualizerSett
 pub async fn set_eq_band(state: State<'_, AppState>, band: usize, gain_db: f32) -> Result<(), String> {
     if band >= 5 {
         return Err("Band index must be 0-4".to_string());
+    }
+    if !(-12.0..=12.0).contains(&gain_db) {
+        return Err("Gain must be between -12.0 and 12.0 dB".to_string());
     }
     state.audio.set_eq_band(band, gain_db);
     Ok(())
@@ -743,7 +721,7 @@ pub async fn get_eq_presets() -> Result<Vec<EqPreset>, String> {
 #[tauri::command]
 pub async fn save_eq_settings(state: State<'_, AppState>) -> Result<(), String> {
     let settings = state.audio.get_eq_settings();
-    state.db.lock().unwrap()
+    lock_db(&state)?
         .save_eq_settings(&settings)
         .map_err(|e| e.to_string())
 }
@@ -751,4 +729,105 @@ pub async fn save_eq_settings(state: State<'_, AppState>) -> Result<(), String> 
 #[tauri::command]
 pub async fn get_visualizer_data() -> Result<Vec<f32>, String> {
     Ok(get_visualizer_levels().to_vec())
+}
+
+// Playback speed control
+#[tauri::command]
+pub async fn set_playback_speed(state: State<'_, AppState>, speed: f32) -> Result<(), String> {
+    if !(0.25..=4.0).contains(&speed) {
+        return Err("Speed must be between 0.25 and 4.0".to_string());
+    }
+    state.audio.set_speed(speed);
+    Ok(())
+}
+
+// Gapless playback: preload next track
+#[tauri::command]
+pub async fn preload_next_track(state: State<'_, AppState>, track_id: i64) -> Result<(), String> {
+    let file_path = {
+        let db = lock_db(&state)?;
+        let track = db.get_track_by_id(track_id).map_err(|e| e.to_string())?;
+        track.file_path
+    };
+    state.audio.preload_next(&file_path);
+    Ok(())
+}
+
+// Play history
+#[tauri::command]
+pub async fn record_play_history(
+    state: State<'_, AppState>,
+    track_id: i64,
+    duration_listened: i64,
+) -> Result<(), String> {
+    lock_db(&state)?
+        .record_play_history(track_id, duration_listened)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn get_play_history(
+    state: State<'_, AppState>,
+    limit: Option<i64>,
+) -> Result<Vec<crate::models::PlayHistoryEntry>, String> {
+    lock_db(&state)?
+        .get_play_history(limit.unwrap_or(50))
+        .map_err(|e| e.to_string())
+}
+
+// Duplicate detection
+#[tauri::command]
+pub async fn get_duplicates(state: State<'_, AppState>) -> Result<Vec<Vec<Track>>, String> {
+    lock_db(&state)?
+        .get_duplicate_tracks()
+        .map_err(|e| e.to_string())
+}
+
+// M3U Playlist Import/Export
+#[tauri::command]
+pub async fn export_playlist_m3u(
+    state: State<'_, AppState>,
+    playlist_id: i64,
+    output_path: String,
+) -> Result<(), String> {
+    let tracks = lock_db(&state)?
+        .get_playlist_tracks(playlist_id)
+        .map_err(|e| e.to_string())?;
+    let playlist = lock_db(&state)?
+        .get_playlist(playlist_id)
+        .map_err(|e| e.to_string())?;
+    crate::playlist_io::export_m3u(&playlist.name, &tracks, &output_path)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn import_playlist_m3u(
+    state: State<'_, AppState>,
+    file_path: String,
+    playlist_name: Option<String>,
+) -> Result<i64, String> {
+    let entries = crate::playlist_io::parse_m3u(&file_path)
+        .map_err(|e| e.to_string())?;
+
+    let name = playlist_name.unwrap_or_else(|| {
+        std::path::Path::new(&file_path)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("Imported Playlist")
+            .to_string()
+    });
+
+    let mut db = lock_db(&state)?;
+    let playlist_id = db.create_playlist(&name).map_err(|e| e.to_string())?;
+
+    // Match entries to existing tracks by file path
+    for entry in &entries {
+        if let Ok(tracks) = db.find_tracks_by_path(&entry.path) {
+            for track in tracks {
+                let _ = db.add_track_to_playlist(playlist_id, track.id, None);
+            }
+        }
+    }
+
+    Ok(playlist_id)
 }

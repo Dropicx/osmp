@@ -1,9 +1,18 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { useStore } from '../store/useStore';
+import { useLibraryData, useLibraryActions } from '../store/selectors';
 import { Play, Music } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 
-function AlbumDetailView({ albumName, artist, onBack }: { albumName: string; artist: string | null; onBack: () => void }) {
+function AlbumDetailView({
+  albumName,
+  artist,
+  onBack,
+}: {
+  albumName: string;
+  artist: string | null;
+  onBack: () => void;
+}) {
   const { albumTracks, albumLoading, loadAlbumTracks, playTrack, playAlbum } = useStore();
   const [coverArt, setCoverArt] = useState<string | null>(null);
 
@@ -43,11 +52,7 @@ function AlbumDetailView({ albumName, artist, onBack }: { albumName: string; art
       <div className="flex gap-6">
         <div className="w-64 h-64 rounded-xl flex items-center justify-center flex-shrink-0 overflow-hidden">
           {coverArt ? (
-            <img
-              src={coverArt}
-              alt={albumName}
-              className="w-full h-full object-cover rounded-xl"
-            />
+            <img src={coverArt} alt={albumName} className="w-full h-full object-cover rounded-xl" />
           ) : (
             <div className="w-full h-full bg-gradient-to-br from-primary-600/20 to-accent-600/20 rounded-xl flex items-center justify-center">
               <Music size={64} className="text-primary-400" />
@@ -58,7 +63,8 @@ function AlbumDetailView({ albumName, artist, onBack }: { albumName: string; art
           <h1 className="text-4xl font-bold mb-2 text-text-primary">{albumName}</h1>
           <p className="text-xl text-text-secondary mb-4">{artist || 'Unknown Artist'}</p>
           <p className="text-text-tertiary mb-4">
-            {albumTracks.length} track{albumTracks.length !== 1 ? 's' : ''} • {formatDuration(totalDuration)}
+            {albumTracks.length} track{albumTracks.length !== 1 ? 's' : ''} •{' '}
+            {formatDuration(totalDuration)}
           </p>
           <button
             onClick={() => playAlbum(albumName, artist)}
@@ -87,7 +93,9 @@ function AlbumDetailView({ albumName, artist, onBack }: { albumName: string; art
                 onDoubleClick={() => playTrack(track.id)}
               >
                 <td className="p-4 text-text-tertiary">{track.track_number || index + 1}</td>
-                <td className="p-4 font-semibold text-text-primary">{track.title || 'Unknown Title'}</td>
+                <td className="p-4 font-semibold text-text-primary">
+                  {track.title || 'Unknown Title'}
+                </td>
                 <td className="p-4 text-right text-text-tertiary font-medium">
                   {formatDuration(track.duration)}
                 </td>
@@ -101,18 +109,43 @@ function AlbumDetailView({ albumName, artist, onBack }: { albumName: string; art
 }
 
 export default function Dashboard() {
-  const { tracks, albums, loadTracks, loadAlbums, playAlbum, playTrack } = useStore();
-  const [selectedAlbum, setSelectedAlbum] = useState<{ name: string; artist: string | null } | null>(null);
+  const { tracks, albums } = useLibraryData();
+  const { loadTracks, loadAlbums, playAlbum, playTrack } = useLibraryActions();
+  const [selectedAlbum, setSelectedAlbum] = useState<{
+    name: string;
+    artist: string | null;
+  } | null>(null);
 
   useEffect(() => {
     loadTracks();
     loadAlbums();
   }, [loadTracks, loadAlbums]);
 
-  // Group tracks by album for recently added
-  const recentlyAddedAlbums = albums
-    .sort((a, b) => b.created_at - a.created_at)
-    .slice(0, 12);
+  // Memoized: sort albums by created_at and take top 12
+  const recentlyAddedAlbums = useMemo(
+    () => [...albums].sort((a, b) => b.created_at - a.created_at).slice(0, 12),
+    [albums]
+  );
+
+  // Memoized: group tracks by genre+artist for recommendations
+  const recommendationGroups = useMemo(() => {
+    const recommendations = tracks
+      .filter((t) => t.genre && t.artist)
+      .reduce(
+        (acc, track) => {
+          const key = `${track.genre}-${track.artist}`;
+          if (!acc[key]) {
+            acc[key] = [];
+          }
+          if (acc[key].length < 6) {
+            acc[key].push(track);
+          }
+          return acc;
+        },
+        {} as Record<string, typeof tracks>
+      );
+    return Object.values(recommendations).slice(0, 3);
+  }, [tracks]);
 
   if (selectedAlbum) {
     return (
@@ -123,22 +156,6 @@ export default function Dashboard() {
       />
     );
   }
-
-  // Simple recommendation: group by genre and artist
-  const recommendations = tracks
-    .filter(t => t.genre && t.artist)
-    .reduce((acc, track) => {
-      const key = `${track.genre}-${track.artist}`;
-      if (!acc[key]) {
-        acc[key] = [];
-      }
-      if (acc[key].length < 6) {
-        acc[key].push(track);
-      }
-      return acc;
-    }, {} as Record<string, typeof tracks>);
-
-  const recommendationGroups = Object.values(recommendations).slice(0, 3);
 
   const formatDuration = (seconds: number | null) => {
     if (!seconds) return '0:00';
@@ -194,7 +211,10 @@ export default function Dashboard() {
                   <h3 className="font-semibold truncate text-text-primary" title={album.name}>
                     {album.name}
                   </h3>
-                  <p className="text-sm text-text-tertiary truncate" title={album.artist || 'Unknown Artist'}>
+                  <p
+                    className="text-sm text-text-tertiary truncate"
+                    title={album.artist || 'Unknown Artist'}
+                  >
                     {album.artist || 'Unknown Artist'}
                   </p>
                 </div>
@@ -213,7 +233,9 @@ export default function Dashboard() {
                   <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-4">
                     {group.map((track) => {
                       // Find album cover for this track
-                      const album = albums.find(a => a.name === track.album && a.artist === track.artist);
+                      const album = albums.find(
+                        (a) => a.name === track.album && a.artist === track.artist
+                      );
                       return (
                         <div
                           key={track.id}
@@ -240,10 +262,16 @@ export default function Dashboard() {
                               <Play size={32} className="text-white ml-1" fill="white" />
                             </button>
                           </div>
-                          <h3 className="font-semibold truncate text-text-primary" title={track.title || 'Unknown'}>
+                          <h3
+                            className="font-semibold truncate text-text-primary"
+                            title={track.title || 'Unknown'}
+                          >
                             {track.title || 'Unknown Title'}
                           </h3>
-                          <p className="text-sm text-text-tertiary truncate" title={track.artist || 'Unknown Artist'}>
+                          <p
+                            className="text-sm text-text-tertiary truncate"
+                            title={track.artist || 'Unknown Artist'}
+                          >
                             {track.artist || 'Unknown Artist'}
                           </p>
                         </div>
@@ -265,7 +293,9 @@ export default function Dashboard() {
                     <th className="text-left p-4 text-text-tertiary font-medium text-sm">Title</th>
                     <th className="text-left p-4 text-text-tertiary font-medium text-sm">Artist</th>
                     <th className="text-left p-4 text-text-tertiary font-medium text-sm">Album</th>
-                    <th className="text-right p-4 text-text-tertiary font-medium text-sm">Duration</th>
+                    <th className="text-right p-4 text-text-tertiary font-medium text-sm">
+                      Duration
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
@@ -276,8 +306,12 @@ export default function Dashboard() {
                       onClick={() => playTrack(track.id)}
                     >
                       <td className="p-4 text-text-tertiary">{index + 1}</td>
-                      <td className="p-4 font-semibold text-text-primary">{track.title || 'Unknown Title'}</td>
-                      <td className="p-4 text-text-secondary">{track.artist || 'Unknown Artist'}</td>
+                      <td className="p-4 font-semibold text-text-primary">
+                        {track.title || 'Unknown Title'}
+                      </td>
+                      <td className="p-4 text-text-secondary">
+                        {track.artist || 'Unknown Artist'}
+                      </td>
                       <td className="p-4 text-text-secondary">{track.album || 'Unknown Album'}</td>
                       <td className="p-4 text-right text-text-tertiary font-medium">
                         {formatDuration(track.duration)}

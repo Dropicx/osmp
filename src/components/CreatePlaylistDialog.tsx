@@ -8,7 +8,11 @@ interface CreatePlaylistDialogProps {
   onCreated?: (playlistId: number) => void;
 }
 
-export default function CreatePlaylistDialog({ isOpen, onClose, onCreated }: CreatePlaylistDialogProps) {
+export default function CreatePlaylistDialog({
+  isOpen,
+  onClose,
+  onCreated,
+}: CreatePlaylistDialogProps) {
   const { createPlaylist, playlists } = useStore();
   const [name, setName] = useState('');
   const [error, setError] = useState('');
@@ -33,7 +37,7 @@ export default function CreatePlaylistDialog({ isOpen, onClose, onCreated }: Cre
     }
 
     // Check for duplicate names
-    if (playlists.some(p => p.name.toLowerCase() === name.trim().toLowerCase())) {
+    if (playlists.some((p) => p.name.toLowerCase() === name.trim().toLowerCase())) {
       setError('A playlist with this name already exists');
       return;
     }
@@ -78,7 +82,10 @@ export default function CreatePlaylistDialog({ isOpen, onClose, onCreated }: Cre
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label htmlFor="playlist-name" className="block text-sm font-medium text-text-secondary mb-2">
+            <label
+              htmlFor="playlist-name"
+              className="block text-sm font-medium text-text-secondary mb-2"
+            >
               Playlist Name
             </label>
             <input
@@ -94,9 +101,7 @@ export default function CreatePlaylistDialog({ isOpen, onClose, onCreated }: Cre
               className="w-full px-4 py-2.5 bg-bg-elevated border border-bg-surface rounded-xl text-text-primary placeholder-text-muted focus:outline-none focus:border-primary-500 transition-colors"
               autoComplete="off"
             />
-            {error && (
-              <p className="mt-2 text-sm text-red-400">{error}</p>
-            )}
+            {error && <p className="mt-2 text-sm text-red-400">{error}</p>}
           </div>
 
           <div className="flex gap-3 justify-end">

@@ -2,6 +2,7 @@
 name = "osmp"
 version = "0.1.0"
 description = "Open Source Music Player"
+license = "PolyForm-Noncommercial-1.0.0"
 authors = ["Dropicx"]
 edition = "2021"
 
@@ -22,11 +23,13 @@ rusqlite = { version = "0.30", features = ["bundled"] }
 walkdir = "2"
 lofty = "0.19"
 reqwest = { version = "0.11", features = ["json"] }
-tokio = { version = "1", features = ["full"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"] }
 rodio = "0.21"
 anyhow = "1"
 thiserror = "1"
 urlencoding = "2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 base64 = "0.22"
 dirs = "5"
 regex = "1"
@@ -46,4 +49,7 @@ windows = { version = "0.52", features = [
     "Media",
     "Foundation",
 ] }
+
+[dev-dependencies]
+tempfile = "3"
 

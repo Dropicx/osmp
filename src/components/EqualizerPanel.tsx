@@ -33,23 +33,26 @@ export default function EqualizerPanel() {
     applyEqPreset('Flat');
   }, [applyEqPreset]);
 
-  const handleBandChange = useCallback((band: number, value: number) => {
-    setEqBand(band, value);
-  }, [setEqBand]);
+  const handleBandChange = useCallback(
+    (band: number, value: number) => {
+      setEqBand(band, value);
+    },
+    [setEqBand]
+  );
 
-  const handlePreampChange = useCallback((value: number) => {
-    setEqPreamp(value);
-  }, [setEqPreamp]);
+  const handlePreampChange = useCallback(
+    (value: number) => {
+      setEqPreamp(value);
+    },
+    [setEqPreamp]
+  );
 
   if (!isEqPanelOpen || !eqSettings) return null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
       {/* Backdrop */}
-      <div
-        className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-        onClick={handleClose}
-      />
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={handleClose} />
 
       {/* Panel */}
       <div className="relative bg-bg-elevated rounded-2xl shadow-2xl border border-bg-surface w-[520px] max-w-[90vw] overflow-hidden">
@@ -92,9 +95,7 @@ export default function EqualizerPanel() {
                   {preset.name}
                 </option>
               ))}
-              {eqSettings.preset_name === 'Custom' && (
-                <option value="Custom">Custom</option>
-              )}
+              {eqSettings.preset_name === 'Custom' && <option value="Custom">Custom</option>}
             </select>
           </div>
         </div>
@@ -115,7 +116,8 @@ export default function EqualizerPanel() {
               [&::-webkit-slider-thumb]:shadow-md"
           />
           <span className="text-xs text-text-tertiary w-12 text-right">
-            {eqSettings.preamp_db > 0 ? '+' : ''}{eqSettings.preamp_db.toFixed(1)} dB
+            {eqSettings.preamp_db > 0 ? '+' : ''}
+            {eqSettings.preamp_db.toFixed(1)} dB
           </span>
         </div>
 
@@ -126,7 +128,8 @@ export default function EqualizerPanel() {
               <div key={index} className="flex flex-col items-center gap-2 flex-1">
                 {/* Gain value */}
                 <span className="text-xs text-text-tertiary h-4">
-                  {band.gain_db > 0 ? '+' : ''}{band.gain_db.toFixed(0)}
+                  {band.gain_db > 0 ? '+' : ''}
+                  {band.gain_db.toFixed(0)}
                 </span>
 
                 {/* Vertical slider container */}

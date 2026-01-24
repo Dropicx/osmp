@@ -1,6 +1,6 @@
 use rodio::{Decoder, OutputStreamBuilder, Sink};
 use std::fs::File;
-use std::io::{Cursor, Read};
+use std::io::BufReader;
 use std::sync::mpsc::{channel, Sender, RecvTimeoutError};
 use std::time::Duration;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -9,6 +9,7 @@ use std::thread;
 use std::time::Instant;
 use anyhow::{Context, Result};
 use crate::equalizer::{EqualizerSettings, EqualizerSource, bump_settings_version};
+use tracing::{info, error};
 
 // Commands sent to the audio thread
 pub enum AudioCommand {
@@ -17,6 +18,8 @@ pub enum AudioCommand {
     Stop,
     SetVolume(f32),
     Seek(f64), // Seek to position in seconds
+    SetSpeed(f32),
+    PreloadNext(String),
     SetEqBand { band: usize, gain_db: f32 },
     SetEqEnabled(bool),
     SetEqPreset { bands: [f32; 5], preamp: f32, name: String },
@@ -69,7 +72,7 @@ impl AudioController {
             let stream = match OutputStreamBuilder::open_default_stream() {
                 Ok(s) => s,
                 Err(e) => {
-                    eprintln!("Failed to create audio output: {}", e);
+                    error!("Failed to create audio output: {}", e);
                     return;
                 }
             };
@@ -79,6 +82,8 @@ impl AudioController {
             let mut playback_start: Option<Instant> = None;
             let mut paused_position_ms: u64 = 0;
             let mut current_volume: f32 = 1.0;
+            let mut current_speed: f32 = 1.0;
+            let mut preloaded_path: Option<String> = None;
 
             loop {
                 // Check for commands with timeout so we can update position regularly
@@ -91,17 +96,14 @@ impl AudioController {
                                     sink.stop();
                                 }
 
-                                // Load entire file into memory, then decode
-                                match File::open(&file_path).and_then(|mut file| {
-                                    let mut buf = Vec::new();
-                                    file.read_to_end(&mut buf)?;
-                                    Ok(buf)
-                                }) {
-                                    Ok(buf) => {
-                                        match Decoder::new(Cursor::new(buf)) {
+                                // Stream audio with 256KB buffered reader to prevent micro-lags
+                                match File::open(&file_path).map(|f| BufReader::with_capacity(256 * 1024, f)) {
+                                    Ok(reader) => {
+                                        match Decoder::new(reader) {
                                             Ok(source) => {
-                                                let sink = Sink::connect_new(&mixer);
+                                                let sink = Sink::connect_new(mixer);
                                                 sink.set_volume(current_volume);
+                                                sink.set_speed(current_speed);
                                                 // Wrap source with EQ
                                                 let eq_source = EqualizerSource::new(
                                                     source,
@@ -113,15 +115,16 @@ impl AudioController {
                                                 current_sink = Some(sink);
                                                 playback_start = Some(Instant::now());
                                                 paused_position_ms = 0;
+                                                preloaded_path = None;
 
                                                 thread_state.is_playing.store(true, Ordering::Relaxed);
                                                 thread_state.is_paused.store(false, Ordering::Relaxed);
                                                 thread_state.position_ms.store(0, Ordering::Relaxed);
                                             }
-                                            Err(e) => eprintln!("Failed to decode audio: {}", e),
+                                            Err(e) => error!("Failed to decode audio: {}", e),
                                         }
                                     }
-                                    Err(e) => eprintln!("Failed to load file: {}", e),
+                                    Err(e) => error!("Failed to open file: {}", e),
                                 }
                             }
 
@@ -170,6 +173,19 @@ impl AudioController {
                                     playback_start = Some(Instant::now());
                                     thread_state.position_ms.store(paused_position_ms, Ordering::Relaxed);
                                 }
+                            }
+
+                            AudioCommand::SetSpeed(speed) => {
+                                current_speed = speed.clamp(0.25, 4.0);
+                                if let Some(ref sink) = current_sink {
+                                    sink.set_speed(current_speed);
+                                }
+                            }
+
+                            AudioCommand::PreloadNext(file_path) => {
+                                // Store the path for gapless transition
+                                preloaded_path = Some(file_path);
+                                info!("Preloaded next track for gapless playback");
                             }
 
                             AudioCommand::SetEqBand { band, gain_db } => {
@@ -227,10 +243,34 @@ impl AudioController {
                     }
                 }
 
-                // Check if playback finished
+                // Check if playback finished - handle gapless transition
                 if let Some(ref sink) = current_sink {
-                    if sink.empty() && !sink.is_paused() {
-                        thread_state.is_playing.store(false, Ordering::Relaxed);
+                    if sink.empty() && !sink.is_paused() && thread_state.is_playing.load(Ordering::Relaxed) {
+                        if let Some(next_path) = preloaded_path.take() {
+                            // Gapless: immediately start preloaded track
+                            match File::open(&next_path).map(|f| BufReader::with_capacity(256 * 1024, f)) {
+                                Ok(reader) => {
+                                    if let Ok(source) = Decoder::new(reader) {
+                                        let eq_source = EqualizerSource::new(
+                                            source,
+                                            Arc::clone(&thread_eq_settings),
+                                        );
+                                        sink.append(eq_source);
+                                        playback_start = Some(Instant::now());
+                                        paused_position_ms = 0;
+                                        thread_state.position_ms.store(0, Ordering::Relaxed);
+                                        info!("Gapless transition to next track");
+                                    } else {
+                                        thread_state.is_playing.store(false, Ordering::Relaxed);
+                                    }
+                                }
+                                Err(_) => {
+                                    thread_state.is_playing.store(false, Ordering::Relaxed);
+                                }
+                            }
+                        } else {
+                            thread_state.is_playing.store(false, Ordering::Relaxed);
+                        }
                     }
                 }
             }
@@ -266,6 +306,14 @@ impl AudioController {
         let _ = self.sender.send(AudioCommand::Seek(position_secs));
     }
 
+    pub fn set_speed(&self, speed: f32) {
+        let _ = self.sender.send(AudioCommand::SetSpeed(speed));
+    }
+
+    pub fn preload_next(&self, file_path: &str) {
+        let _ = self.sender.send(AudioCommand::PreloadNext(file_path.to_string()));
+    }
+
     pub fn set_eq_band(&self, band: usize, gain_db: f32) {
         let _ = self.sender.send(AudioCommand::SetEqBand { band, gain_db });
     }
@@ -283,6 +331,8 @@ impl AudioController {
     }
 
     pub fn get_eq_settings(&self) -> EqualizerSettings {
-        self.state.eq_settings.read().unwrap().clone()
+        self.state.eq_settings.read()
+            .map(|s| s.clone())
+            .unwrap_or_default()
     }
 }

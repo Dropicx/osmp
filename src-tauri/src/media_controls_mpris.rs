@@ -8,25 +8,31 @@ pub struct MprisControls {
     player: Arc<Mutex<Option<Player>>>,
     event_sender: mpsc::UnboundedSender<MediaControlEvent>,
     connection: Arc<Mutex<Option<Connection>>>,
+    runtime: Arc<tokio::runtime::Runtime>,
 }
 
 impl MprisControls {
     pub fn new(event_sender: mpsc::UnboundedSender<MediaControlEvent>) -> Result<Self, Box<dyn std::error::Error>> {
         let player = Arc::new(Mutex::new(None));
         let connection = Arc::new(Mutex::new(None));
-        
+        let runtime = Arc::new(tokio::runtime::Runtime::new()?);
+
         // Create player on a separate thread since zbus requires async runtime
         let player_clone = Arc::clone(&player);
         let connection_clone = Arc::clone(&connection);
         let event_sender_clone = event_sender.clone();
-        
+        let rt_clone = Arc::clone(&runtime);
+
         std::thread::spawn(move || {
-            let rt = tokio::runtime::Runtime::new().unwrap();
-            rt.block_on(async {
+            rt_clone.block_on(async {
                 match Self::setup_player(event_sender_clone).await {
                     Ok((p, conn)) => {
-                        *player_clone.lock().unwrap() = Some(p);
-                        *connection_clone.lock().unwrap() = Some(conn);
+                        if let Ok(mut guard) = player_clone.lock() {
+                            *guard = Some(p);
+                        }
+                        if let Ok(mut guard) = connection_clone.lock() {
+                            *guard = Some(conn);
+                        }
                     }
                     Err(e) => {
                         eprintln!("Failed to setup MPRIS player: {}", e);
@@ -39,6 +45,7 @@ impl MprisControls {
             player,
             event_sender,
             connection,
+            runtime,
         })
     }
 
@@ -107,9 +114,7 @@ impl MediaControlsPlatform for MprisControls {
     fn update_metadata(&self, metadata: &MediaMetadata) -> Result<(), String> {
         let player_guard = self.player.lock().map_err(|e| format!("Lock error: {}", e))?;
         if let Some(ref player) = *player_guard {
-            let rt = tokio::runtime::Runtime::new().map_err(|e| format!("Failed to create runtime: {}", e))?;
-            
-            rt.block_on(async {
+            self.runtime.block_on(async {
                 let mut mpris_metadata = mpris_server::Metadata::empty();
                 mpris_metadata.set_title(&metadata.title);
                 mpris_metadata.set_artists(&[metadata.artist.clone()]);
@@ -132,9 +137,7 @@ impl MediaControlsPlatform for MprisControls {
     fn update_playback_state(&self, state: PlaybackState) -> Result<(), String> {
         let player_guard = self.player.lock().map_err(|e| format!("Lock error: {}", e))?;
         if let Some(ref player) = *player_guard {
-            let rt = tokio::runtime::Runtime::new().map_err(|e| format!("Failed to create runtime: {}", e))?;
-            
-            rt.block_on(async {
+            self.runtime.block_on(async {
                 let playback_status = match state {
                     PlaybackState::Playing => PlaybackStatus::Playing,
                     PlaybackState::Paused => PlaybackStatus::Paused,
@@ -149,9 +152,7 @@ impl MediaControlsPlatform for MprisControls {
     fn update_position(&self, position: f64) -> Result<(), String> {
         let player_guard = self.player.lock().map_err(|e| format!("Lock error: {}", e))?;
         if let Some(ref player) = *player_guard {
-            let rt = tokio::runtime::Runtime::new().map_err(|e| format!("Failed to create runtime: {}", e))?;
-            
-            rt.block_on(async {
+            self.runtime.block_on(async {
                 // MPRIS position is in microseconds
                 let position_us = (position * 1_000_000.0) as i64;
                 player.set_position(position_us).await
@@ -163,9 +164,7 @@ impl MediaControlsPlatform for MprisControls {
     fn set_available_actions(&self, can_go_next: bool, can_go_previous: bool) -> Result<(), String> {
         let player_guard = self.player.lock().map_err(|e| format!("Lock error: {}", e))?;
         if let Some(ref player) = *player_guard {
-            let rt = tokio::runtime::Runtime::new().map_err(|e| format!("Failed to create runtime: {}", e))?;
-            
-            rt.block_on(async {
+            self.runtime.block_on(async {
                 player.set_can_go_next(can_go_next).await?;
                 player.set_can_go_previous(can_go_previous).await;
                 Ok::<(), zbus::Error>(())

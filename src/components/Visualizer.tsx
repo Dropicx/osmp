@@ -1,5 +1,6 @@
 import { useRef, useEffect, useCallback, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { useIsPlaying } from '../store/selectors';
 import { useStore } from '../store/useStore';
 
 interface VisualizerProps {
@@ -8,7 +9,7 @@ interface VisualizerProps {
 
 const BAR_COUNT = 10;
 const BAR_GAP = 3;
-const POLL_INTERVAL = 50; // ms between data polls
+const POLL_INTERVAL = 100; // ms between data polls (10fps, smooth for bar visualization)
 
 export default function Visualizer({ onClick }: VisualizerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -17,7 +18,8 @@ export default function Visualizer({ onClick }: VisualizerProps) {
   const barsRef = useRef<number[]>(new Array(BAR_COUNT).fill(0));
   const targetBarsRef = useRef<number[]>(new Array(BAR_COUNT).fill(0));
   const [hovered, setHovered] = useState(false);
-  const { isPlaying, visualizerOpacity } = useStore();
+  const isPlaying = useIsPlaying();
+  const visualizerOpacity = useStore((s) => s.visualizerOpacity);
 
   // Poll backend for real frequency data
   useEffect(() => {
@@ -82,8 +84,8 @@ export default function Visualizer({ onClick }: VisualizerProps) {
       // Gradient fill - intensity varies with level
       const gradient = ctx.createLinearGradient(x, y, x, height - padding);
       const alpha = 0.7 + barLevel * 0.3;
-      gradient.addColorStop(0, `rgba(139, 92, 246, ${alpha})`);  // primary-500
-      gradient.addColorStop(1, `rgba(236, 72, 153, ${alpha * 0.8})`);  // accent-500
+      gradient.addColorStop(0, `rgba(139, 92, 246, ${alpha})`); // primary-500
+      gradient.addColorStop(1, `rgba(236, 72, 153, ${alpha * 0.8})`); // accent-500
       ctx.fillStyle = gradient;
 
       // Draw rounded bar

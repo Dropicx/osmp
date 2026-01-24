@@ -1,26 +1,47 @@
 import { useState, useRef, useEffect } from 'react';
 import { useStore } from '../store/useStore';
+import { usePosition, usePlayerState, usePlayerControls, useQueueState } from '../store/selectors';
 import { invoke } from '@tauri-apps/api/core';
-import { Play, Pause, SkipBack, SkipForward, Volume2, Shuffle, Repeat, Repeat1, MoreVertical, Pencil, Download, Image, Music2, Trash2 } from 'lucide-react';
+import {
+  Play,
+  Pause,
+  SkipBack,
+  SkipForward,
+  Volume2,
+  Shuffle,
+  Repeat,
+  Repeat1,
+  MoreVertical,
+  Pencil,
+  Download,
+  Image,
+  Music2,
+  Trash2,
+  List,
+  Gauge,
+} from 'lucide-react';
 import EditMetadataModal from './EditMetadataModal';
 import AddToPlaylistMenu from './AddToPlaylistMenu';
+import QueuePanel from './QueuePanel';
+import { formatDuration } from '../utils/formatting';
+import { DEFAULT_TITLE, DEFAULT_ARTIST } from '../constants';
 import type { Track, MetadataResult, CoverFetchResult } from '../types';
 
 export default function Player() {
+  const position = usePosition();
+  const { currentTrack, isPlaying, volume, shuffleEnabled, repeatMode } = usePlayerState();
+  const playbackSpeed = useStore((s) => s.playbackSpeed);
+  const setPlaybackSpeed = useStore((s) => s.setPlaybackSpeed);
   const {
-    currentTrack,
-    isPlaying,
-    volume,
-    position,
-    shuffleEnabled,
-    repeatMode,
-    setVolume,
     pausePlayback,
+    playNextTrack,
+    playPreviousTrack,
+    setVolume,
     toggleShuffle,
     cycleRepeatMode,
-    playNextTrack,
-    playPreviousTrack
-  } = useStore();
+  } = usePlayerControls();
+  const [showSpeedMenu, setShowSpeedMenu] = useState(false);
+  const { queue, toggleQueuePanel } = useQueueState();
   const [hoverTime, setHoverTime] = useState<number | null>(null);
   const [hoverPercent, setHoverPercent] = useState<number>(0);
   const progressBarRef = useRef<HTMLDivElement>(null);
@@ -37,8 +58,12 @@ export default function Player() {
   useEffect(() => {
     if (!showMenu) return;
     const handleClick = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node) &&
-          menuBtnRef.current && !menuBtnRef.current.contains(e.target as Node)) {
+      if (
+        menuRef.current &&
+        !menuRef.current.contains(e.target as Node) &&
+        menuBtnRef.current &&
+        !menuBtnRef.current.contains(e.target as Node)
+      ) {
         setShowMenu(false);
       }
     };
@@ -59,10 +84,13 @@ export default function Player() {
     setShowMenu(false);
     setFetchingMetadata(true);
     try {
-      await invoke<MetadataResult[]>('fetch_metadata', { trackIds: [currentTrack.id], force: false });
+      await invoke<MetadataResult[]>('fetch_metadata', {
+        trackIds: [currentTrack.id],
+        force: false,
+      });
       await useStore.getState().refreshCurrentTrack();
-    } catch (error) {
-      console.error('Failed to fetch metadata:', error);
+    } catch {
+      // Error handled silently
     } finally {
       setFetchingMetadata(false);
     }
@@ -74,8 +102,8 @@ export default function Player() {
     setFetchingCovers(true);
     try {
       await invoke<CoverFetchResult[]>('fetch_covers', { trackIds: [currentTrack.id] });
-    } catch (error) {
-      console.error('Failed to fetch covers:', error);
+    } catch {
+      // Error handled silently
     } finally {
       setFetchingCovers(false);
     }
@@ -87,18 +115,10 @@ export default function Player() {
     try {
       await invoke('delete_track', { trackId: currentTrack.id });
       useStore.getState().stopPlayback();
-      useStore.getState().loadTracks();
-    } catch (error) {
-      console.error('Failed to delete track:', error);
+      useStore.getState().loadTracks(true);
+    } catch {
+      // Error handled silently
     }
-  };
-
-  const formatDuration = (seconds: number | null) => {
-    if (seconds === null || seconds === undefined) return '0:00';
-    const secs = Math.floor(seconds);
-    const mins = Math.floor(secs / 60);
-    const remainingSecs = secs % 60;
-    return `${mins}:${remainingSecs.toString().padStart(2, '0')}`;
   };
 
   const handlePrevious = () => {
@@ -119,8 +139,8 @@ export default function Player() {
 
     try {
       await invoke('seek_to_position', { position: seekTime });
-    } catch (error) {
-      console.error('Failed to seek:', error);
+    } catch {
+      // Error handled silently
     }
   };
 
@@ -151,6 +171,11 @@ export default function Player() {
 
   return (
     <div className="bg-bg-elevated border-t border-bg-surface px-8 py-5 shadow-2xl">
+      {/* Screen reader announcement for now playing */}
+      <div aria-live="polite" aria-atomic="true" className="sr-only">
+        Now playing: {currentTrack.title || 'Unknown Title'} by{' '}
+        {currentTrack.artist || 'Unknown Artist'}
+      </div>
       <div className="flex items-center justify-between gap-6">
         {/* Track Info */}
         <div className="flex items-center gap-3 flex-1 min-w-0">
@@ -159,12 +184,19 @@ export default function Player() {
             onClick={handleMenuToggle}
             className="btn-icon flex-shrink-0"
             title="Track options"
+            aria-label="Track options"
+            aria-expanded={showMenu}
+            aria-haspopup="menu"
           >
-            <MoreVertical size={20} className="text-text-secondary" />
+            <MoreVertical size={20} className="text-text-secondary" aria-hidden="true" />
           </button>
           <div className="min-w-0 flex-1">
-            <p className="font-semibold text-text-primary truncate">{currentTrack.title || 'Unknown Title'}</p>
-            <p className="text-sm text-text-tertiary truncate">{currentTrack.artist || 'Unknown Artist'}</p>
+            <p className="font-semibold text-text-primary truncate">
+              {currentTrack.title || DEFAULT_TITLE}
+            </p>
+            <p className="text-sm text-text-tertiary truncate">
+              {currentTrack.artist || DEFAULT_ARTIST}
+            </p>
           </div>
         </div>
 
@@ -173,47 +205,128 @@ export default function Player() {
           <button
             onClick={toggleShuffle}
             className={`btn-icon ${shuffleEnabled ? 'text-primary-500' : ''}`}
-            title={shuffleEnabled ? "Shuffle: On" : "Shuffle: Off"}
+            title={shuffleEnabled ? 'Shuffle: On' : 'Shuffle: Off'}
+            aria-label={shuffleEnabled ? 'Shuffle: On' : 'Shuffle: Off'}
+            aria-pressed={shuffleEnabled}
           >
-            <Shuffle size={18} className={shuffleEnabled ? 'text-primary-500' : 'text-text-secondary'} />
+            <Shuffle
+              size={18}
+              className={shuffleEnabled ? 'text-primary-500' : 'text-text-secondary'}
+              aria-hidden="true"
+            />
           </button>
           <button
             onClick={handlePrevious}
             className="btn-icon"
             title="Previous track"
+            aria-label="Previous track"
           >
-            <SkipBack size={20} className="text-text-secondary" />
+            <SkipBack size={20} className="text-text-secondary" aria-hidden="true" />
           </button>
           <button
             onClick={pausePlayback}
             className="p-4 bg-primary-600 hover:bg-primary-700 text-white rounded-full hover:scale-110 transition-all duration-200 shadow-lg shadow-primary-600/40 flex items-center justify-center"
-            title={isPlaying ? "Pause" : "Play"}
+            title={isPlaying ? 'Pause' : 'Play'}
+            aria-label={isPlaying ? 'Pause' : 'Play'}
           >
-            {isPlaying ? <Pause size={24} fill="currentColor" /> : <Play size={24} fill="currentColor" className="ml-0.5" />}
+            {isPlaying ? (
+              <Pause size={24} fill="currentColor" />
+            ) : (
+              <Play size={24} fill="currentColor" className="ml-0.5" />
+            )}
           </button>
           <button
             onClick={handleNext}
             className="btn-icon"
             title="Next track"
+            aria-label="Next track"
           >
-            <SkipForward size={20} className="text-text-secondary" />
+            <SkipForward size={20} className="text-text-secondary" aria-hidden="true" />
           </button>
           <button
             onClick={cycleRepeatMode}
             className={`btn-icon relative ${repeatMode !== 'off' ? 'text-primary-500' : ''}`}
-            title={repeatMode === 'off' ? 'Repeat: Off' : repeatMode === 'list' ? 'Repeat: All' : 'Repeat: One'}
+            title={
+              repeatMode === 'off'
+                ? 'Repeat: Off'
+                : repeatMode === 'list'
+                  ? 'Repeat: All'
+                  : 'Repeat: One'
+            }
+            aria-label={
+              repeatMode === 'off'
+                ? 'Repeat: Off'
+                : repeatMode === 'list'
+                  ? 'Repeat: All'
+                  : 'Repeat: One'
+            }
+            aria-pressed={repeatMode !== 'off'}
           >
             {repeatMode === 'track' ? (
-              <Repeat1 size={18} className="text-primary-500" />
+              <Repeat1 size={18} className="text-primary-500" aria-hidden="true" />
             ) : (
-              <Repeat size={18} className={repeatMode === 'list' ? 'text-primary-500' : 'text-text-secondary'} />
+              <Repeat
+                size={18}
+                className={repeatMode === 'list' ? 'text-primary-500' : 'text-text-secondary'}
+                aria-hidden="true"
+              />
             )}
           </button>
+          <div className="relative">
+            <button
+              onClick={() => setShowSpeedMenu(!showSpeedMenu)}
+              className={`btn-icon text-xs font-semibold ${playbackSpeed !== 1.0 ? 'text-primary-500' : 'text-text-secondary'}`}
+              title={`Playback speed: ${playbackSpeed}x`}
+              aria-label={`Playback speed: ${playbackSpeed}x`}
+              aria-expanded={showSpeedMenu}
+              aria-haspopup="menu"
+            >
+              <Gauge size={16} aria-hidden="true" />
+            </button>
+            {showSpeedMenu && (
+              <div
+                className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 bg-bg-card border border-bg-surface rounded-lg shadow-xl py-1 min-w-[80px] z-50"
+                role="menu"
+                aria-label="Playback speed options"
+              >
+                {[0.5, 0.75, 1.0, 1.25, 1.5, 2.0].map((speed) => (
+                  <button
+                    key={speed}
+                    onClick={() => {
+                      setPlaybackSpeed(speed);
+                      setShowSpeedMenu(false);
+                    }}
+                    className={`w-full px-3 py-1.5 text-sm text-center transition-colors ${
+                      playbackSpeed === speed
+                        ? 'text-primary-500 bg-primary-500/10'
+                        : 'text-text-primary hover:bg-bg-hover'
+                    }`}
+                    role="menuitem"
+                  >
+                    {speed}x
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
 
-        {/* Volume */}
+        {/* Volume and Queue */}
         <div className="flex items-center gap-3 flex-1 justify-end">
-          <Volume2 size={18} className="text-text-tertiary" />
+          <button
+            onClick={toggleQueuePanel}
+            className="btn-icon relative"
+            title="Queue"
+            aria-label={`Queue${queue.length > 0 ? ` (${queue.length} tracks)` : ''}`}
+          >
+            <List size={18} className="text-text-secondary" />
+            {queue.length > 0 && (
+              <span className="absolute -top-1 -right-1 bg-primary-500 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center font-semibold">
+                {queue.length}
+              </span>
+            )}
+          </button>
+          <Volume2 size={18} className="text-text-tertiary" aria-hidden="true" />
           <input
             type="range"
             min="0"
@@ -221,9 +334,10 @@ export default function Player() {
             step="0.01"
             value={volume}
             onChange={(e) => setVolume(parseFloat(e.target.value))}
+            aria-label="Volume"
             className="w-28 h-1.5 bg-bg-card rounded-lg appearance-none cursor-pointer accent-primary-600"
             style={{
-              background: `linear-gradient(to right, #6366f1 0%, #6366f1 ${volume * 100}%, #1f1f2e ${volume * 100}%, #1f1f2e 100%)`
+              background: `linear-gradient(to right, #6366f1 0%, #6366f1 ${volume * 100}%, #1f1f2e ${volume * 100}%, #1f1f2e 100%)`,
             }}
           />
           <span className="text-sm text-text-tertiary w-12 text-right font-medium">
@@ -242,6 +356,11 @@ export default function Player() {
             onClick={handleProgressClick}
             onMouseMove={handleProgressHover}
             onMouseLeave={handleProgressLeave}
+            role="slider"
+            aria-label="Playback progress"
+            aria-valuenow={Math.floor(position)}
+            aria-valuemin={0}
+            aria-valuemax={currentTrack?.duration || 0}
           >
             {/* Progress fill */}
             <div
@@ -267,7 +386,9 @@ export default function Player() {
               </>
             )}
           </div>
-          <span className="w-12 text-right font-medium">{formatDuration(currentTrack.duration)}</span>
+          <span className="w-12 text-right font-medium">
+            {formatDuration(currentTrack.duration)}
+          </span>
         </div>
       </div>
 
@@ -277,9 +398,14 @@ export default function Player() {
           ref={menuRef}
           className="fixed z-50 bg-bg-card border border-bg-surface rounded-xl shadow-2xl py-2 min-w-[180px]"
           style={{ left: menuPosition.x, top: menuPosition.y, transform: 'translateY(-100%)' }}
+          role="menu"
+          aria-label="Track options menu"
         >
           <button
-            onClick={() => { setEditingTrack(currentTrack); setShowMenu(false); }}
+            onClick={() => {
+              setEditingTrack(currentTrack);
+              setShowMenu(false);
+            }}
             className="w-full px-4 py-2 text-left text-text-primary hover:bg-bg-hover flex items-center gap-3 transition-colors"
           >
             <Pencil size={16} className="text-blue-400" />
@@ -304,7 +430,10 @@ export default function Player() {
           </button>
           <div className="h-px bg-bg-surface my-1" />
           <button
-            onClick={() => { setAddToPlaylistOpen(true); setShowMenu(false); }}
+            onClick={() => {
+              setAddToPlaylistOpen(true);
+              setShowMenu(false);
+            }}
             className="w-full px-4 py-2 text-left text-text-primary hover:bg-bg-hover flex items-center gap-3 transition-colors"
           >
             <Music2 size={16} className="text-primary-500" />
@@ -342,6 +471,9 @@ export default function Player() {
           position={menuPosition}
         />
       )}
+
+      {/* Queue Panel */}
+      <QueuePanel />
     </div>
   );
 }

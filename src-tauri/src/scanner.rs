@@ -11,6 +11,7 @@ use walkdir::WalkDir;
 use anyhow::Result;
 use std::fs;
 use tauri::Emitter;
+use tracing::{warn, error};
 
 const BATCH_SIZE: usize = 100;
 const AUDIO_EXTENSIONS: [&str; 8] = ["mp3", "flac", "ogg", "m4a", "wav", "aac", "opus", "wma"];
@@ -39,7 +40,8 @@ impl ScannerWithProgress {
         let total_files = files.len();
 
         // 2. Get existing files for incremental scanning
-        let existing_files = self.db.lock().unwrap()
+        let existing_files = self.db.lock()
+            .map_err(|e| anyhow::anyhow!("Database lock poisoned: {}", e))?
             .get_existing_file_info()
             .unwrap_or_default();
 
@@ -55,7 +57,9 @@ impl ScannerWithProgress {
             if self.cancelled.load(Ordering::SeqCst) {
                 // Flush any remaining batch before returning
                 if !batch.is_empty() {
-                    let _ = self.db.lock().unwrap().insert_tracks_batch(&batch);
+                    if let Ok(mut db) = self.db.lock() {
+                        let _ = db.insert_tracks_batch(&batch);
+                    }
                 }
 
                 return Ok(ScanResult {
@@ -92,9 +96,15 @@ impl ScannerWithProgress {
 
                     // Batch insert when batch is full
                     if batch.len() >= BATCH_SIZE {
-                        if let Err(e) = self.db.lock().unwrap().insert_tracks_batch(&batch) {
-                            // Log batch error but continue
-                            eprintln!("Batch insert error: {}", e);
+                        match self.db.lock() {
+                            Ok(mut db) => {
+                                if let Err(e) = db.insert_tracks_batch(&batch) {
+                                    warn!("Batch insert error: {}", e);
+                                }
+                            }
+                            Err(e) => {
+                                error!("Database lock poisoned during batch insert: {}", e);
+                            }
                         }
                         batch.clear();
                     }
@@ -118,8 +128,15 @@ impl ScannerWithProgress {
 
         // Insert remaining batch
         if !batch.is_empty() {
-            if let Err(e) = self.db.lock().unwrap().insert_tracks_batch(&batch) {
-                eprintln!("Final batch insert error: {}", e);
+            match self.db.lock() {
+                Ok(mut db) => {
+                    if let Err(e) = db.insert_tracks_batch(&batch) {
+                        warn!("Final batch insert error: {}", e);
+                    }
+                }
+                Err(e) => {
+                    error!("Database lock poisoned during final batch insert: {}", e);
+                }
             }
         }
 

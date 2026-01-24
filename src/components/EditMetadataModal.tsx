@@ -67,10 +67,7 @@ export default function EditMetadataModal({ track, onClose, onSaved }: EditMetad
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
       {/* Backdrop */}
-      <div
-        className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-        onClick={onClose}
-      />
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
 
       {/* Modal */}
       <div className="relative bg-bg-card border border-bg-surface rounded-2xl shadow-2xl w-full max-w-lg mx-4 overflow-hidden animate-slide-up">
@@ -184,7 +181,8 @@ export default function EditMetadataModal({ track, onClose, onSaved }: EditMetad
                   Also write to file
                 </div>
                 <p className="text-xs text-text-tertiary mt-1">
-                  Save metadata directly to the audio file (ID3 tags). This will modify the original file.
+                  Save metadata directly to the audio file (ID3 tags). This will modify the original
+                  file.
                 </p>
               </div>
             </label>
@@ -200,11 +198,7 @@ export default function EditMetadataModal({ track, onClose, onSaved }: EditMetad
 
         {/* Footer */}
         <div className="flex items-center justify-end gap-3 p-4 border-t border-bg-surface bg-bg-elevated">
-          <button
-            onClick={onClose}
-            className="btn-tertiary"
-            disabled={saving}
-          >
+          <button onClick={onClose} className="btn-tertiary" disabled={saving}>
             Cancel
           </button>
           <button

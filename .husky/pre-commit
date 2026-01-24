@@ -1,0 +1,4 @@
+npm run lint
+npm run format:check
+npx vitest run --bail 1
+cd src-tauri && cargo clippy -- -D warnings

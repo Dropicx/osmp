@@ -124,3 +124,17 @@ export interface EqPreset {
   bands: number[];
   preamp: number;
 }
+
+export interface PlayHistoryEntry {
+  id: number;
+  track_id: number;
+  played_at: number;
+  duration_listened: number;
+  track: Track | null;
+}
+
+export interface M3uEntry {
+  path: string;
+  title: string | null;
+  duration: number | null;
+}

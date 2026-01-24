@@ -3,8 +3,21 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { open } from '@tauri-apps/plugin-dialog';
 import { ScanFolder, ScanDiscovery, ScanProgress, ScanResult } from '../types';
-import { FolderPlus, Trash2, Play, Loader, X, AlertCircle, ChevronDown, ChevronRight, Heart, ExternalLink } from 'lucide-react';
+import {
+  FolderPlus,
+  Trash2,
+  Play,
+  Loader,
+  X,
+  AlertCircle,
+  ChevronDown,
+  ChevronRight,
+  Heart,
+  ExternalLink,
+  RotateCcw,
+} from 'lucide-react';
 import { useStore } from '../store/useStore';
+import { COLUMN_DEFINITIONS } from '../constants';
 
 interface ParsedError {
   file: string;
@@ -52,7 +65,7 @@ function ErrorList({ errorFiles }: { errorFiles: string[] }) {
   const grouped = parseErrorFiles(errorFiles);
 
   const toggleGroup = (key: string) => {
-    setExpandedGroups(prev => {
+    setExpandedGroups((prev) => {
       const next = new Set(prev);
       if (next.has(key)) {
         next.delete(key);
@@ -139,7 +152,16 @@ export default function Settings() {
   const [progress, setProgress] = useState<ScanProgress | null>(null);
   const [scanResult, setScanResult] = useState<ScanResult | null>(null);
   const [showErrors, setShowErrors] = useState(false);
-  const { visualizerEnabled, setVisualizerEnabled, visualizerOpacity, setVisualizerOpacity } = useStore();
+  const {
+    visualizerEnabled,
+    setVisualizerEnabled,
+    visualizerOpacity,
+    setVisualizerOpacity,
+    columnVisibility,
+    setColumnVisibility,
+    resetColumnWidths,
+    resetColumnVisibility,
+  } = useStore();
 
   useEffect(() => {
     loadFolders();
@@ -159,8 +181,8 @@ export default function Settings() {
     });
 
     return () => {
-      unlistenDiscovery.then(fn => fn());
-      unlistenProgress.then(fn => fn());
+      unlistenDiscovery.then((fn) => fn());
+      unlistenProgress.then((fn) => fn());
     };
   }, []);
 
@@ -168,8 +190,8 @@ export default function Settings() {
     try {
       const folders = await invoke<ScanFolder[]>('get_scan_folders');
       setFolders(folders);
-    } catch (error) {
-      console.error('Failed to load folders:', error);
+    } catch {
+      /* silently handled */
     }
   };
 
@@ -178,15 +200,15 @@ export default function Settings() {
       const selected = await open({
         directory: true,
         multiple: false,
-        title: 'Select Music Folder'
+        title: 'Select Music Folder',
       });
 
       if (selected && typeof selected === 'string') {
         await invoke('add_scan_folder', { path: selected });
         await loadFolders();
       }
-    } catch (error) {
-      console.error('Failed to add folder:', error);
+    } catch {
+      /* silently handled */
     }
   };
 
@@ -194,8 +216,8 @@ export default function Settings() {
     try {
       await invoke('remove_scan_folder', { id });
       await loadFolders();
-    } catch (error) {
-      console.error('Failed to remove folder:', error);
+    } catch {
+      /* silently handled */
     }
   };
 
@@ -211,8 +233,8 @@ export default function Settings() {
       setScanResult(result);
       setScanning(false);
       setDiscovery(null);
-    } catch (error) {
-      console.error('Failed to scan:', error);
+    } catch {
+      /* silently handled */
       setScanning(false);
       setDiscovery(null);
       setScanResult(null);
@@ -222,8 +244,8 @@ export default function Settings() {
   const handleCancelScan = async () => {
     try {
       await invoke('cancel_scan');
-    } catch (error) {
-      console.error('Failed to cancel scan:', error);
+    } catch {
+      /* silently handled */
     }
   };
 
@@ -278,10 +300,7 @@ export default function Settings() {
         </div>
 
         <div className="mb-4">
-          <button
-            onClick={handleAddFolder}
-            className="btn-secondary flex items-center gap-2"
-          >
+          <button onClick={handleAddFolder} className="btn-secondary flex items-center gap-2">
             <FolderPlus size={16} />
             Add Folder
           </button>
@@ -293,9 +312,7 @@ export default function Settings() {
             <div className="flex items-center justify-between mb-3">
               <div className="flex items-center gap-3">
                 <Loader size={16} className="animate-spin text-blue-400" />
-                <span className="text-sm font-medium text-text-primary">
-                  Discovering files...
-                </span>
+                <span className="text-sm font-medium text-text-primary">Discovering files...</span>
               </div>
               <button
                 onClick={handleCancelScan}
@@ -310,13 +327,14 @@ export default function Settings() {
               <div className="text-2xl font-bold text-blue-400">
                 {discovery.files_found.toLocaleString()}
               </div>
-              <div className="text-sm text-text-tertiary">
-                audio files found
-              </div>
+              <div className="text-sm text-text-tertiary">audio files found</div>
             </div>
 
             {discovery.current_folder && (
-              <p className="text-xs text-text-tertiary truncate mt-2" title={discovery.current_folder}>
+              <p
+                className="text-xs text-text-tertiary truncate mt-2"
+                title={discovery.current_folder}
+              >
                 Searching: {discovery.current_folder.split('/').slice(-2).join('/')}
               </p>
             )}
@@ -328,7 +346,8 @@ export default function Settings() {
           <div className="mb-4 p-4 bg-primary-600/10 border border-primary-600/20 rounded-xl">
             <div className="flex items-center justify-between mb-3">
               <span className="text-sm font-medium text-text-primary">
-                Processing: {progress.processed_files.toLocaleString()} / {progress.total_files.toLocaleString()} files
+                Processing: {progress.processed_files.toLocaleString()} /{' '}
+                {progress.total_files.toLocaleString()} files
               </span>
               <button
                 onClick={handleCancelScan}
@@ -356,26 +375,28 @@ export default function Settings() {
 
         {/* Scan Result */}
         {scanResult && !scanning && (
-          <div className={`mb-4 p-4 rounded-xl border ${
-            scanResult.cancelled
-              ? 'bg-warning/10 border-warning/20'
-              : scanResult.errors > 0
-                ? 'bg-primary-600/10 border-primary-600/20'
-                : 'bg-success/10 border-success/20'
-          }`}>
+          <div
+            className={`mb-4 p-4 rounded-xl border ${
+              scanResult.cancelled
+                ? 'bg-warning/10 border-warning/20'
+                : scanResult.errors > 0
+                  ? 'bg-primary-600/10 border-primary-600/20'
+                  : 'bg-success/10 border-success/20'
+            }`}
+          >
             <div className="flex items-start justify-between">
               <div>
                 <p className="font-medium text-text-primary mb-2">
-                  {scanResult.cancelled
-                    ? 'Scan cancelled'
-                    : 'Scan complete'}
+                  {scanResult.cancelled ? 'Scan cancelled' : 'Scan complete'}
                 </p>
                 <div className="grid grid-cols-2 gap-x-6 gap-y-1 text-sm">
                   <p className="text-text-secondary">
-                    <span className="text-text-tertiary">Total files:</span> {scanResult.total_files}
+                    <span className="text-text-tertiary">Total files:</span>{' '}
+                    {scanResult.total_files}
                   </p>
                   <p className="text-text-secondary">
-                    <span className="text-text-tertiary">Duration:</span> {formatDuration(scanResult.duration_secs)}
+                    <span className="text-text-tertiary">Duration:</span>{' '}
+                    {formatDuration(scanResult.duration_secs)}
                   </p>
                   <p className="text-success">
                     <span className="text-text-tertiary">Scanned:</span> {scanResult.scanned}
@@ -460,7 +481,8 @@ export default function Settings() {
                 Audio Visualizer
               </label>
               <p className="text-sm text-text-tertiary">
-                Show animated frequency bars on the album cover. Click the visualizer to open the equalizer.
+                Show animated frequency bars on the album cover. Click the visualizer to open the
+                equalizer.
               </p>
             </div>
             <label className="toggle-switch ml-6 flex-shrink-0">
@@ -493,10 +515,47 @@ export default function Settings() {
                   onChange={(e) => setVisualizerOpacity(Number(e.target.value))}
                   className="w-28 accent-primary-500"
                 />
-                <span className="text-sm text-text-secondary w-10 text-right">{visualizerOpacity}%</span>
+                <span className="text-sm text-text-secondary w-10 text-right">
+                  {visualizerOpacity}%
+                </span>
               </div>
             </div>
           )}
+        </div>
+      </section>
+
+      <section className="bg-bg-card rounded-2xl p-6 border border-bg-surface shadow-lg">
+        <h2 className="text-xl font-semibold mb-2 text-text-primary">Table Columns</h2>
+        <p className="text-sm text-text-tertiary mb-6">
+          Choose which columns are visible in track tables.
+        </p>
+        <div className="space-y-4">
+          {COLUMN_DEFINITIONS.map((col) => (
+            <div key={col.id} className="flex items-center justify-between">
+              <label className="text-sm font-medium text-text-primary">{col.label}</label>
+              <label className="toggle-switch">
+                <input
+                  type="checkbox"
+                  checked={columnVisibility[col.id]}
+                  disabled={col.id === 'title'}
+                  onChange={(e) => setColumnVisibility(col.id, e.target.checked)}
+                />
+                <span className="toggle-slider"></span>
+              </label>
+            </div>
+          ))}
+        </div>
+        <div className="mt-6 pt-4 border-t border-bg-surface">
+          <button
+            onClick={() => {
+              resetColumnWidths();
+              resetColumnVisibility();
+            }}
+            className="btn-secondary flex items-center gap-2"
+          >
+            <RotateCcw size={16} />
+            Reset Column Widths
+          </button>
         </div>
       </section>
 
@@ -529,7 +588,8 @@ export default function Settings() {
           <div className="flex-1">
             <h2 className="text-xl font-semibold mb-2 text-text-primary">Support OSMP</h2>
             <p className="text-sm text-text-secondary mb-4">
-              OSMP is free and open source. If you enjoy using it, consider supporting the development with a small donation.
+              OSMP is free and open source. If you enjoy using it, consider supporting the
+              development with a small donation.
             </p>
             <a
               href="https://ko-fi.com/la7"
@@ -538,7 +598,7 @@ export default function Settings() {
               className="inline-flex items-center gap-2 px-4 py-2.5 bg-[#FF5E5B] hover:bg-[#ff4744] text-white font-medium rounded-xl transition-all duration-200 shadow-lg shadow-[#FF5E5B]/20 hover:shadow-[#FF5E5B]/30 hover:scale-105"
             >
               <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
-                <path d="M23.881 8.948c-.773-4.085-4.859-4.593-4.859-4.593H.723c-.604 0-.679.798-.679.798s-.082 7.324-.022 11.822c.164 2.424 2.586 2.672 2.586 2.672s8.267-.023 11.966-.049c2.438-.426 2.683-2.566 2.658-3.734 4.352.24 7.422-2.831 6.649-6.916zm-11.062 3.511c-1.246 1.453-4.011 3.976-4.011 3.976s-.121.119-.31.023c-.076-.057-.108-.09-.108-.09-.443-.441-3.368-3.049-4.034-3.954-.709-.965-1.041-2.7-.091-3.71.951-1.01 3.005-1.086 4.363.407 0 0 1.565-1.782 3.468-.963 1.904.82 1.832 3.011.723 4.311z"/>
+                <path d="M23.881 8.948c-.773-4.085-4.859-4.593-4.859-4.593H.723c-.604 0-.679.798-.679.798s-.082 7.324-.022 11.822c.164 2.424 2.586 2.672 2.586 2.672s8.267-.023 11.966-.049c2.438-.426 2.683-2.566 2.658-3.734 4.352.24 7.422-2.831 6.649-6.916zm-11.062 3.511c-1.246 1.453-4.011 3.976-4.011 3.976s-.121.119-.31.023c-.076-.057-.108-.09-.108-.09-.443-.441-3.368-3.049-4.034-3.954-.709-.965-1.041-2.7-.091-3.71.951-1.01 3.005-1.086 4.363.407 0 0 1.565-1.782 3.468-.963 1.904.82 1.832 3.011.723 4.311z" />
               </svg>
               Support on Ko-fi
               <ExternalLink size={14} className="opacity-70" />
@@ -551,11 +611,13 @@ export default function Settings() {
       <section className="bg-bg-card rounded-2xl p-6 border border-bg-surface shadow-lg">
         <h2 className="text-xl font-semibold mb-4 text-text-primary">About</h2>
         <div className="space-y-2 text-sm text-text-secondary">
-          <p><span className="text-text-tertiary">Version:</span> 0.1.0</p>
-          <p><span className="text-text-tertiary">Built with:</span> Tauri, React, Rust</p>
-          <p className="pt-2 text-text-tertiary">
-            OSMP - Open Source Music Player
+          <p>
+            <span className="text-text-tertiary">Version:</span> 0.1.0
           </p>
+          <p>
+            <span className="text-text-tertiary">Built with:</span> Tauri, React, Rust
+          </p>
+          <p className="pt-2 text-text-tertiary">OSMP - Open Source Music Player</p>
         </div>
       </section>
     </div>

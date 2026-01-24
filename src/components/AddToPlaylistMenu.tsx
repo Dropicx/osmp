@@ -18,12 +18,7 @@ export default function AddToPlaylistMenu({
   onClose,
   position,
 }: AddToPlaylistMenuProps) {
-  const {
-    playlists,
-    loadPlaylists,
-    addTrackToPlaylist,
-    addTracksToPlaylist,
-  } = useStore();
+  const { playlists, loadPlaylists, addTrackToPlaylist, addTracksToPlaylist } = useStore();
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [adding, setAdding] = useState<number | null>(null);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
@@ -78,7 +73,7 @@ export default function AddToPlaylistMenu({
 
       setToast({
         message: `Added ${tracksToAdd.length} track${tracksToAdd.length > 1 ? 's' : ''} to "${playlistName}"`,
-        type: 'success'
+        type: 'success',
       });
 
       // Close after short delay to show success feedback
@@ -86,10 +81,10 @@ export default function AddToPlaylistMenu({
         onClose();
       }, 800);
     } catch (error: any) {
-      console.error('Failed to add track to playlist:', error);
+      /* silently handled */
       setToast({
         message: error.message || 'Failed to add tracks',
-        type: 'error'
+        type: 'error',
       });
       setTimeout(() => setToast(null), 3000);
     } finally {
@@ -151,11 +146,13 @@ export default function AddToPlaylistMenu({
 
         {/* Toast notification */}
         {toast && (
-          <div className={`mx-2 my-2 px-3 py-2 rounded-lg text-sm ${
-            toast.type === 'success'
-              ? 'bg-green-500/20 text-green-400'
-              : 'bg-red-500/20 text-red-400'
-          }`}>
+          <div
+            className={`mx-2 my-2 px-3 py-2 rounded-lg text-sm ${
+              toast.type === 'success'
+                ? 'bg-green-500/20 text-green-400'
+                : 'bg-red-500/20 text-red-400'
+            }`}
+          >
             {toast.message}
           </div>
         )}
@@ -220,16 +217,16 @@ export default function AddToPlaylistMenu({
             }
             setToast({
               message: `Created playlist and added ${tracksToAdd.length} track${tracksToAdd.length > 1 ? 's' : ''}`,
-              type: 'success'
+              type: 'success',
             });
             setTimeout(() => {
               onClose();
             }, 1000);
-          } catch (error) {
-            console.error('Failed to add tracks to new playlist:', error);
+          } catch {
+            /* silently handled */
             setToast({
               message: 'Playlist created, but failed to add tracks',
-              type: 'error'
+              type: 'error',
             });
           }
         }}

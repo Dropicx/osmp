@@ -1,80 +1,192 @@
-import { useState } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import { useStore } from '../store/useStore';
-import { Search as SearchIcon } from 'lucide-react';
+import { Search as SearchIcon, Play, List, ListPlus } from 'lucide-react';
+import { useContextMenu } from '../hooks/useContextMenu';
+import { useDebounce } from '../hooks/useDebounce';
+import TrackTable from './TrackTable';
+import type { FixedColumn } from './TrackTable';
 
 export default function Search() {
-  const { tracks, searchTracks, playTrack } = useStore();
+  const { tracks, searchTracks, playTrack, addToQueue, loadTracks } = useStore();
   const [query, setQuery] = useState('');
+  const [hasSearched, setHasSearched] = useState(false);
+  const { contextMenu, getMenuPosition, openContextMenu, closeContextMenu } = useContextMenu(200);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const debouncedQuery = useDebounce(query, 300);
 
+  // Debounced live search - triggers on typing after 300ms
+  useEffect(() => {
+    if (debouncedQuery.trim()) {
+      searchTracks(debouncedQuery);
+      setHasSearched(true);
+    } else if (hasSearched) {
+      // Reset to full library when query is cleared
+      loadTracks(true);
+      setHasSearched(false);
+    }
+  }, [debouncedQuery, searchTracks, loadTracks, hasSearched]);
+
+  // Listen for Ctrl/Cmd+F focus event
+  useEffect(() => {
+    const handleFocusSearch = () => {
+      inputRef.current?.focus();
+      inputRef.current?.select();
+    };
+    window.addEventListener('osmp:focus-search', handleFocusSearch);
+    return () => window.removeEventListener('osmp:focus-search', handleFocusSearch);
+  }, []);
+
+  // Immediate search on Enter
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
     if (query.trim()) {
       searchTracks(query);
+      setHasSearched(true);
     }
   };
 
-  const formatDuration = (seconds: number | null) => {
-    if (!seconds) return '0:00';
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins}:${secs.toString().padStart(2, '0')}`;
-  };
+  const leadingColumns = useMemo<FixedColumn[]>(
+    () => [
+      {
+        id: 'row-number',
+        width: 48,
+        headerContent: '#',
+        renderCell: (_track, index) => <span className="text-text-tertiary">{index + 1}</span>,
+      },
+    ],
+    []
+  );
+
+  const trailingColumns = useMemo<FixedColumn[]>(
+    () => [
+      {
+        id: 'actions',
+        width: 96,
+        headerContent: 'Actions',
+        renderCell: (track) => (
+          <div className="flex items-center justify-center gap-2">
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                addToQueue([track.id], 'end');
+              }}
+              className="btn-icon"
+              aria-label="Add to Queue"
+              title="Add to Queue"
+            >
+              <List size={16} className="text-text-tertiary" aria-hidden="true" />
+            </button>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                addToQueue([track.id], 'next');
+              }}
+              className="btn-icon"
+              aria-label="Add Next to Queue"
+              title="Add Next to Queue"
+            >
+              <ListPlus size={16} className="text-text-tertiary" aria-hidden="true" />
+            </button>
+          </div>
+        ),
+      },
+    ],
+    [addToQueue]
+  );
 
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-3xl font-bold mb-6 text-text-primary">Search</h1>
         <form onSubmit={handleSearch} className="relative">
-          <SearchIcon className="absolute left-5 top-1/2 transform -translate-y-1/2 text-text-tertiary" size={20} />
+          <SearchIcon
+            className="absolute left-5 top-1/2 transform -translate-y-1/2 text-text-tertiary"
+            size={20}
+            aria-hidden="true"
+          />
           <input
+            ref={inputRef}
             type="text"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search for songs, artists, or albums..."
             className="w-full bg-bg-card border border-bg-surface rounded-full pl-14 pr-6 py-4 text-lg text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500 transition-all"
+            aria-label="Search for songs, artists, or albums"
           />
         </form>
       </div>
 
-      {tracks.length > 0 && (
+      {hasSearched && tracks?.length > 0 && (
         <div>
           <h2 className="text-xl font-semibold mb-4 text-text-primary">Results</h2>
-          <div className="bg-bg-card rounded-2xl overflow-hidden border border-bg-surface shadow-lg">
-            <table className="w-full">
-              <thead className="bg-bg-elevated border-b border-bg-surface">
-                <tr>
-                  <th className="text-left p-4 text-text-tertiary font-medium text-sm">#</th>
-                  <th className="text-left p-4 text-text-tertiary font-medium text-sm">Title</th>
-                  <th className="text-left p-4 text-text-tertiary font-medium text-sm">Artist</th>
-                  <th className="text-left p-4 text-text-tertiary font-medium text-sm">Album</th>
-                  <th className="text-right p-4 text-text-tertiary font-medium text-sm">Duration</th>
-                </tr>
-              </thead>
-              <tbody>
-                {tracks.map((track, index) => (
-                  <tr
-                    key={track.id}
-                    className="hover:bg-bg-hover cursor-pointer transition-colors"
-                    onClick={() => playTrack(track.id)}
-                  >
-                    <td className="p-4 text-text-tertiary">{index + 1}</td>
-                    <td className="p-4 font-semibold text-text-primary">{track.title || 'Unknown Title'}</td>
-                    <td className="p-4 text-text-secondary">{track.artist || 'Unknown Artist'}</td>
-                    <td className="p-4 text-text-secondary">{track.album || 'Unknown Album'}</td>
-                    <td className="p-4 text-right text-text-tertiary font-medium">
-                      {formatDuration(track.duration)}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div className="bg-bg-card rounded-2xl overflow-auto border border-bg-surface shadow-lg">
+            <TrackTable
+              tracks={tracks}
+              leadingColumns={leadingColumns}
+              trailingColumns={trailingColumns}
+              virtualized={false}
+              onRowDoubleClick={(track) => playTrack(track.id)}
+              onRowContextMenu={(e, track) => openContextMenu(e, track.id)}
+            />
           </div>
         </div>
       )}
 
-      {query && tracks.length === 0 && (
+      {hasSearched && query && (tracks?.length ?? 0) === 0 && (
         <div className="text-center text-text-tertiary py-12">
-          <p className="text-lg">No results found for "{query}"</p>
+          <p className="text-lg">No results found for &quot;{query}&quot;</p>
+        </div>
+      )}
+
+      {/* Context Menu */}
+      {contextMenu && (
+        <div
+          className="fixed z-50 bg-bg-card border border-bg-surface rounded-xl shadow-2xl py-2 min-w-[180px] animate-slide-up"
+          style={getMenuPosition()}
+          onClick={(e) => e.stopPropagation()}
+          role="menu"
+          aria-label="Track context menu"
+        >
+          <button
+            onClick={() => {
+              if (contextMenu) {
+                playTrack(contextMenu.trackId);
+              }
+              closeContextMenu();
+            }}
+            className="w-full px-4 py-2 text-left text-text-primary hover:bg-bg-hover flex items-center gap-3 transition-colors"
+            role="menuitem"
+          >
+            <Play size={16} className="text-primary-500" aria-hidden="true" />
+            Play
+          </button>
+          <div className="h-px bg-bg-surface my-1" role="separator" />
+          <button
+            onClick={async () => {
+              if (contextMenu) {
+                await addToQueue([contextMenu.trackId], 'end');
+              }
+              closeContextMenu();
+            }}
+            className="w-full px-4 py-2 text-left text-text-primary hover:bg-bg-hover flex items-center gap-3 transition-colors"
+            role="menuitem"
+          >
+            <List size={16} className="text-primary-500" aria-hidden="true" />
+            Add to Queue
+          </button>
+          <button
+            onClick={async () => {
+              if (contextMenu) {
+                await addToQueue([contextMenu.trackId], 'next');
+              }
+              closeContextMenu();
+            }}
+            className="w-full px-4 py-2 text-left text-text-primary hover:bg-bg-hover flex items-center gap-3 transition-colors"
+            role="menuitem"
+          >
+            <ListPlus size={16} className="text-primary-500" aria-hidden="true" />
+            Add Next to Queue
+          </button>
         </div>
       )}
     </div>
