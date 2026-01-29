@@ -134,6 +134,13 @@ pub struct PlayHistoryEntry {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ScanSettings {
+    pub scan_on_startup: bool,
+    pub periodic_scan_enabled: bool,
+    pub periodic_scan_interval_minutes: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct M3uEntry {
     pub path: String,
     pub title: Option<String>,

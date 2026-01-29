@@ -68,6 +68,12 @@ export interface ScanError {
   error: string;
 }
 
+export interface ScanSettings {
+  scan_on_startup: boolean;
+  periodic_scan_enabled: boolean;
+  periodic_scan_interval_minutes: number;
+}
+
 // Library sorting types
 export type SortField = 'title' | 'artist' | 'album' | 'genre' | 'duration' | 'year';
 export type SortDirection = 'asc' | 'desc';

@@ -1,11 +1,11 @@
-use crate::models::{Track, TrackFilters, ScanFolder, MetadataResult, AlbumInfo, ScanResult, Playlist};
+use crate::models::{Track, TrackFilters, ScanFolder, MetadataResult, AlbumInfo, ScanResult, ScanSettings, Playlist};
 use crate::scanner::ScannerWithProgress;
 use crate::metadata::MetadataFetcher;
 use crate::equalizer::{EqualizerSettings, EqPreset, get_presets, get_visualizer_levels};
 use crate::AppState;
 use crate::media_controls::{MediaMetadata, PlaybackState};
 use crate::database::DatabaseInner;
-use tauri::State;
+use tauri::{State, Manager};
 use std::sync::{Arc, MutexGuard};
 use std::sync::atomic::Ordering;
 use std::path::PathBuf;
@@ -37,11 +37,23 @@ pub async fn remove_scan_folder(state: State<'_, AppState>, id: i64) -> Result<(
 
 #[tauri::command]
 pub async fn scan_folders(state: State<'_, AppState>, window: tauri::Window) -> Result<ScanResult, String> {
+    // Check if a scan is already running
+    if state.scan_running.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst).is_err() {
+        return Err("A scan is already in progress".to_string());
+    }
+
     let db = Arc::clone(&state.db);
     let cancelled = Arc::clone(&state.scan_cancelled);
+    let scan_running = Arc::clone(&state.scan_running);
 
     let enabled_folders: Vec<String> = {
-        let folders = db.lock().map_err(|e| format!("Database lock error: {}", e))?.get_scan_folders().map_err(|e| e.to_string())?;
+        let folders = db.lock().map_err(|e| {
+            scan_running.store(false, Ordering::SeqCst);
+            format!("Database lock error: {}", e)
+        })?.get_scan_folders().map_err(|e| {
+            scan_running.store(false, Ordering::SeqCst);
+            e.to_string()
+        })?;
         folders
             .into_iter()
             .filter(|f| f.enabled)
@@ -51,8 +63,10 @@ pub async fn scan_folders(state: State<'_, AppState>, window: tauri::Window) -> 
 
     // Run scanning in a background thread to prevent UI freeze
     let result = tokio::task::spawn_blocking(move || {
-        let scanner = ScannerWithProgress::new(db, window, cancelled);
-        scanner.scan_with_progress(enabled_folders)
+        let scanner = ScannerWithProgress::new(db, window.app_handle().clone(), cancelled);
+        let result = scanner.scan_with_progress(enabled_folders);
+        scan_running.store(false, Ordering::SeqCst);
+        result
     })
     .await
     .map_err(|e| format!("Scan task error: {}", e))?
@@ -830,4 +844,41 @@ pub async fn import_playlist_m3u(
     }
 
     Ok(playlist_id)
+}
+
+// Scan settings commands
+
+#[tauri::command]
+pub async fn get_scan_settings(state: State<'_, AppState>) -> Result<ScanSettings, String> {
+    let db = lock_db(&state)?;
+    let scan_on_startup = db.get_setting("scan_on_startup")
+        .map_err(|e| e.to_string())?
+        .map(|v| v == "true")
+        .unwrap_or(true);
+    let periodic_scan_enabled = db.get_setting("periodic_scan_enabled")
+        .map_err(|e| e.to_string())?
+        .map(|v| v == "true")
+        .unwrap_or(true);
+    let periodic_scan_interval_minutes = db.get_setting("periodic_scan_interval_minutes")
+        .map_err(|e| e.to_string())?
+        .and_then(|v| v.parse::<u64>().ok())
+        .unwrap_or(30);
+
+    Ok(ScanSettings {
+        scan_on_startup,
+        periodic_scan_enabled,
+        periodic_scan_interval_minutes,
+    })
+}
+
+#[tauri::command]
+pub async fn set_scan_settings(state: State<'_, AppState>, settings: ScanSettings) -> Result<(), String> {
+    let mut db = lock_db(&state)?;
+    db.set_setting("scan_on_startup", &settings.scan_on_startup.to_string())
+        .map_err(|e| e.to_string())?;
+    db.set_setting("periodic_scan_enabled", &settings.periodic_scan_enabled.to_string())
+        .map_err(|e| e.to_string())?;
+    db.set_setting("periodic_scan_interval_minutes", &settings.periodic_scan_interval_minutes.to_string())
+        .map_err(|e| e.to_string())?;
+    Ok(())
 }

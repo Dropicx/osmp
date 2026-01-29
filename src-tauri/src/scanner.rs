@@ -19,13 +19,18 @@ const AUDIO_EXTENSIONS: [&str; 8] = ["mp3", "flac", "ogg", "m4a", "wav", "aac", 
 /// Scanner with progress reporting, incremental scanning, batching, and cancellation support
 pub struct ScannerWithProgress {
     db: Database,
-    window: tauri::Window,
+    app_handle: tauri::AppHandle,
     cancelled: Arc<AtomicBool>,
+    quiet: bool,
 }
 
 impl ScannerWithProgress {
-    pub fn new(db: Database, window: tauri::Window, cancelled: Arc<AtomicBool>) -> Self {
-        ScannerWithProgress { db, window, cancelled }
+    pub fn new(db: Database, app_handle: tauri::AppHandle, cancelled: Arc<AtomicBool>) -> Self {
+        ScannerWithProgress { db, app_handle, cancelled, quiet: false }
+    }
+
+    pub fn new_quiet(db: Database, app_handle: tauri::AppHandle, cancelled: Arc<AtomicBool>) -> Self {
+        ScannerWithProgress { db, app_handle, cancelled, quiet: true }
     }
 
     /// Main scan entry point with all optimizations
@@ -74,13 +79,15 @@ impl ScannerWithProgress {
             }
 
             // Emit progress event
-            let progress = ScanProgress {
-                current_file: path.display().to_string(),
-                total_files,
-                processed_files: index,
-                is_complete: false,
-            };
-            let _ = self.window.emit("scan-progress", &progress);
+            if !self.quiet {
+                let progress = ScanProgress {
+                    current_file: path.display().to_string(),
+                    total_files,
+                    processed_files: index,
+                    is_complete: false,
+                };
+                let _ = self.app_handle.emit("scan-progress", &progress);
+            }
 
             // Check if file needs scanning (incremental)
             if !self.should_scan_file(path, &existing_files) {
@@ -117,11 +124,13 @@ impl ScannerWithProgress {
                     error_files.push(format!("{}|{}", path.display(), error_msg));
 
                     // Emit error event
-                    let scan_error = ScanError {
-                        file: path.display().to_string(),
-                        error: error_msg,
-                    };
-                    let _ = self.window.emit("scan-error", &scan_error);
+                    if !self.quiet {
+                        let scan_error = ScanError {
+                            file: path.display().to_string(),
+                            error: error_msg,
+                        };
+                        let _ = self.app_handle.emit("scan-error", &scan_error);
+                    }
                 }
             }
         }
@@ -143,13 +152,15 @@ impl ScannerWithProgress {
         let duration_secs = start_time.elapsed().as_secs_f64();
 
         // Emit completion event
-        let completion = ScanProgress {
-            current_file: String::new(),
-            total_files,
-            processed_files: total_files,
-            is_complete: true,
-        };
-        let _ = self.window.emit("scan-progress", &completion);
+        if !self.quiet {
+            let completion = ScanProgress {
+                current_file: String::new(),
+                total_files,
+                processed_files: total_files,
+                is_complete: true,
+            };
+            let _ = self.app_handle.emit("scan-progress", &completion);
+        }
 
         Ok(ScanResult {
             total_files,
@@ -173,11 +184,13 @@ impl ScannerWithProgress {
             }
 
             // Emit discovery start for this folder
-            let _ = self.window.emit("scan-discovery", ScanDiscovery {
-                files_found: files.len(),
-                current_folder: folder_path.clone(),
-                is_complete: false,
-            });
+            if !self.quiet {
+                let _ = self.app_handle.emit("scan-discovery", ScanDiscovery {
+                    files_found: files.len(),
+                    current_folder: folder_path.clone(),
+                    is_complete: false,
+                });
+            }
 
             for entry in WalkDir::new(folder_path).into_iter().filter_map(|e| e.ok()) {
                 // Check for cancellation during discovery
@@ -194,8 +207,8 @@ impl ScannerWithProgress {
                             files.push(path.to_path_buf());
 
                             // Emit progress every 100ms to avoid flooding
-                            if last_emit.elapsed().as_millis() > 100 {
-                                let _ = self.window.emit("scan-discovery", ScanDiscovery {
+                            if !self.quiet && last_emit.elapsed().as_millis() > 100 {
+                                let _ = self.app_handle.emit("scan-discovery", ScanDiscovery {
                                     files_found: files.len(),
                                     current_folder: folder_path.clone(),
                                     is_complete: false,
@@ -209,11 +222,13 @@ impl ScannerWithProgress {
         }
 
         // Emit discovery complete
-        let _ = self.window.emit("scan-discovery", ScanDiscovery {
-            files_found: files.len(),
-            current_folder: String::new(),
-            is_complete: true,
-        });
+        if !self.quiet {
+            let _ = self.app_handle.emit("scan-discovery", ScanDiscovery {
+                files_found: files.len(),
+                current_folder: String::new(),
+                is_complete: true,
+            });
+        }
 
         files
     }

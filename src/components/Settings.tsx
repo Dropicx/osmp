@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { getVersion } from '@tauri-apps/api/app';
 import { listen } from '@tauri-apps/api/event';
 import { open } from '@tauri-apps/plugin-dialog';
-import { ScanFolder, ScanDiscovery, ScanProgress, ScanResult } from '../types';
+import { check } from '@tauri-apps/plugin-updater';
+import { ScanFolder, ScanDiscovery, ScanProgress, ScanResult, ScanSettings } from '../types';
 import {
   FolderPlus,
   Trash2,
@@ -15,6 +17,8 @@ import {
   Heart,
   ExternalLink,
   RotateCcw,
+  RefreshCw,
+  Clock,
 } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { COLUMN_DEFINITIONS } from '../constants';
@@ -152,6 +156,16 @@ export default function Settings() {
   const [progress, setProgress] = useState<ScanProgress | null>(null);
   const [scanResult, setScanResult] = useState<ScanResult | null>(null);
   const [showErrors, setShowErrors] = useState(false);
+  const [appVersion, setAppVersion] = useState('');
+  const [updateCheckStatus, setUpdateCheckStatus] = useState<
+    'idle' | 'checking' | 'none' | 'available' | 'error'
+  >('idle');
+  const [updateVersion, setUpdateVersion] = useState<string | null>(null);
+  const [scanSettings, setScanSettings] = useState<ScanSettings>({
+    scan_on_startup: true,
+    periodic_scan_enabled: true,
+    periodic_scan_interval_minutes: 30,
+  });
   const {
     visualizerEnabled,
     setVisualizerEnabled,
@@ -172,14 +186,42 @@ export default function Settings() {
     }
   };
 
-  // Load folders on mount
+  // Load folders and scan settings on mount
   useEffect(() => {
     invoke<ScanFolder[]>('get_scan_folders')
       .then(setFolders)
       .catch(() => {
         /* silently handled */
       });
+    invoke<ScanSettings>('get_scan_settings')
+      .then(setScanSettings)
+      .catch(() => {
+        /* silently handled */
+      });
   }, []);
+
+  // Load app version on mount
+  useEffect(() => {
+    getVersion()
+      .then(setAppVersion)
+      .catch(() => setAppVersion('unknown'));
+  }, []);
+
+  const handleCheckForUpdates = async () => {
+    setUpdateCheckStatus('checking');
+    setUpdateVersion(null);
+    try {
+      const update = await check();
+      if (update) {
+        setUpdateCheckStatus('available');
+        setUpdateVersion(update.version);
+      } else {
+        setUpdateCheckStatus('none');
+      }
+    } catch {
+      setUpdateCheckStatus('error');
+    }
+  };
 
   // Subscribe to scan events
   useEffect(() => {
@@ -202,6 +244,16 @@ export default function Settings() {
       unlistenProgress.then((fn) => fn());
     };
   }, []);
+
+  const updateScanSettings = async (updates: Partial<ScanSettings>) => {
+    const newSettings = { ...scanSettings, ...updates };
+    setScanSettings(newSettings);
+    try {
+      await invoke('set_scan_settings', { settings: newSettings });
+    } catch {
+      /* silently handled */
+    }
+  };
 
   const handleAddFolder = async () => {
     try {
@@ -483,6 +535,96 @@ export default function Settings() {
       </section>
 
       <section className="bg-bg-card rounded-2xl p-6 border border-bg-surface shadow-lg">
+        <div className="flex items-center gap-3 mb-6">
+          <Clock size={20} className="text-text-tertiary" />
+          <div>
+            <h2 className="text-xl font-semibold text-text-primary">Automatic Scanning</h2>
+            <p className="text-sm text-text-tertiary mt-1">
+              Automatically detect new music files without manual scans
+            </p>
+          </div>
+        </div>
+        <div className="space-y-4">
+          <div className="flex items-start justify-between">
+            <div className="flex-1">
+              <label
+                htmlFor="toggle-scan-startup"
+                className="block text-sm font-semibold mb-2 text-text-primary"
+              >
+                Scan on startup
+              </label>
+              <p className="text-sm text-text-tertiary">
+                Scan your music folders when the app launches
+              </p>
+            </div>
+            <label className="toggle-switch ml-6 flex-shrink-0">
+              <input
+                id="toggle-scan-startup"
+                type="checkbox"
+                checked={scanSettings.scan_on_startup}
+                onChange={(e) => updateScanSettings({ scan_on_startup: e.target.checked })}
+                aria-label="Scan on startup"
+              />
+              <span className="toggle-slider"></span>
+            </label>
+          </div>
+
+          <div className="flex items-start justify-between">
+            <div className="flex-1">
+              <label
+                htmlFor="toggle-periodic-scan"
+                className="block text-sm font-semibold mb-2 text-text-primary"
+              >
+                Periodic scan
+              </label>
+              <p className="text-sm text-text-tertiary">
+                Periodically check for new music files while the app is running
+              </p>
+            </div>
+            <label className="toggle-switch ml-6 flex-shrink-0">
+              <input
+                id="toggle-periodic-scan"
+                type="checkbox"
+                checked={scanSettings.periodic_scan_enabled}
+                onChange={(e) => updateScanSettings({ periodic_scan_enabled: e.target.checked })}
+                aria-label="Periodic scan"
+              />
+              <span className="toggle-slider"></span>
+            </label>
+          </div>
+
+          {scanSettings.periodic_scan_enabled && (
+            <div className="flex items-center justify-between pt-2">
+              <div className="flex-1">
+                <label
+                  htmlFor="select-scan-interval"
+                  className="block text-sm font-semibold mb-2 text-text-primary"
+                >
+                  Scan interval
+                </label>
+                <p className="text-sm text-text-tertiary">
+                  How often to check for new files (takes effect on next app launch)
+                </p>
+              </div>
+              <select
+                id="select-scan-interval"
+                value={scanSettings.periodic_scan_interval_minutes}
+                onChange={(e) =>
+                  updateScanSettings({ periodic_scan_interval_minutes: Number(e.target.value) })
+                }
+                className="ml-6 flex-shrink-0 bg-bg-elevated border border-bg-surface text-text-primary rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+              >
+                <option value={15}>Every 15 minutes</option>
+                <option value={30}>Every 30 minutes</option>
+                <option value={60}>Every 1 hour</option>
+                <option value={120}>Every 2 hours</option>
+              </select>
+            </div>
+          )}
+        </div>
+      </section>
+
+      <section className="bg-bg-card rounded-2xl p-6 border border-bg-surface shadow-lg">
         <h2 className="text-xl font-semibold mb-6 text-text-primary">Appearance</h2>
         <div className="space-y-4">
           <div className="flex items-start justify-between">
@@ -646,12 +788,40 @@ export default function Settings() {
         <h2 className="text-xl font-semibold mb-4 text-text-primary">About</h2>
         <div className="space-y-2 text-sm text-text-secondary">
           <p>
-            <span className="text-text-tertiary">Version:</span> 0.1.1
+            <span className="text-text-tertiary">Version:</span> {appVersion || '...'}
           </p>
           <p>
             <span className="text-text-tertiary">Built with:</span> Tauri, React, Rust
           </p>
           <p className="pt-2 text-text-tertiary">OSMP - Open Source Music Player</p>
+        </div>
+        <div className="mt-4 pt-4 border-t border-bg-surface">
+          <button
+            onClick={handleCheckForUpdates}
+            disabled={updateCheckStatus === 'checking'}
+            className="btn-secondary flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {updateCheckStatus === 'checking' ? (
+              <>
+                <Loader size={16} className="animate-spin" />
+                Checking...
+              </>
+            ) : (
+              <>
+                <RefreshCw size={16} />
+                Check for Updates
+              </>
+            )}
+          </button>
+          {updateCheckStatus === 'none' && (
+            <p className="mt-2 text-sm text-success">You're on the latest version.</p>
+          )}
+          {updateCheckStatus === 'available' && updateVersion && (
+            <p className="mt-2 text-sm text-primary-400">Update available: v{updateVersion}</p>
+          )}
+          {updateCheckStatus === 'error' && (
+            <p className="mt-2 text-sm text-text-tertiary">Could not check for updates.</p>
+          )}
         </div>
       </section>
     </div>

@@ -1,5 +1,7 @@
 # OSMP Quick Start Guide
 
+OSMP runs on **macOS and Linux only** (Windows is not supported). The SQLite database and app data are stored in the platform data directory (e.g. `~/.local/share/osmp/` on Linux, `~/Library/Application Support/osmp/` on macOS).
+
 ## Getting Started
 
 ### 1. Run the Application

@@ -66,12 +66,23 @@ jobs:
 
       - name: Build Tauri app
         run: npx tauri build
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
 
       - name: Upload DMG artifact
         uses: actions/upload-artifact@v4
         with:
           name: macos-dmg
           path: src-tauri/target/release/bundle/dmg/*.dmg
+
+      - name: Upload macOS updater artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-updater
+          path: |
+            src-tauri/target/release/bundle/macos/*.tar.gz
+            src-tauri/target/release/bundle/macos/*.tar.gz.sig
 
   build-linux:
     needs: quality-check
@@ -118,12 +129,23 @@ jobs:
 
       - name: Build Tauri app
         run: npx tauri build
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
 
       - name: Upload AppImage artifact
         uses: actions/upload-artifact@v4
         with:
           name: linux-appimage
           path: src-tauri/target/release/bundle/appimage/*.AppImage
+
+      - name: Upload Linux updater artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-updater
+          path: |
+            src-tauri/target/release/bundle/appimage/*.tar.gz
+            src-tauri/target/release/bundle/appimage/*.tar.gz.sig
 
   release:
     needs: [build-macos, build-linux]
@@ -139,11 +161,96 @@ jobs:
           name: macos-dmg
           path: artifacts/macos
 
+      - name: Download macOS updater artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: macos-updater
+          path: artifacts/macos-updater
+
       - name: Download Linux artifact
         uses: actions/download-artifact@v4
         with:
           name: linux-appimage
           path: artifacts/linux
+
+      - name: Download Linux updater artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: linux-updater
+          path: artifacts/linux-updater
+
+      - name: Generate latest.json
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          PUB_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          REPO="Dropicx/osmp"
+
+          # Read signatures
+          MACOS_AARCH64_SIG=""
+          MACOS_X86_64_SIG=""
+          LINUX_X86_64_SIG=""
+
+          # Find macOS signatures (aarch64 and x86_64)
+          for sig_file in artifacts/macos-updater/*.tar.gz.sig; do
+            [ -f "$sig_file" ] || continue
+            sig_content="$(cat "$sig_file")"
+            basename="$(basename "$sig_file" .sig)"
+            if echo "$basename" | grep -qi "aarch64"; then
+              MACOS_AARCH64_SIG="$sig_content"
+              MACOS_AARCH64_NAME="$basename"
+            elif echo "$basename" | grep -qi "x86_64\|x64\|intel"; then
+              MACOS_X86_64_SIG="$sig_content"
+              MACOS_X86_64_NAME="$basename"
+            else
+              # Default: assume aarch64 for Apple Silicon runners
+              if [ -z "$MACOS_AARCH64_SIG" ]; then
+                MACOS_AARCH64_SIG="$sig_content"
+                MACOS_AARCH64_NAME="$basename"
+              else
+                MACOS_X86_64_SIG="$sig_content"
+                MACOS_X86_64_NAME="$basename"
+              fi
+            fi
+          done
+
+          # Find Linux signature
+          for sig_file in artifacts/linux-updater/*.tar.gz.sig; do
+            [ -f "$sig_file" ] || continue
+            LINUX_X86_64_SIG="$(cat "$sig_file")"
+            LINUX_X86_64_NAME="$(basename "$sig_file" .sig)"
+          done
+
+          BASE_URL="https://github.com/${REPO}/releases/download/${GITHUB_REF_NAME}"
+
+          # Build platforms JSON dynamically
+          PLATFORMS="{"
+
+          if [ -n "$MACOS_AARCH64_SIG" ]; then
+            PLATFORMS="${PLATFORMS}\"darwin-aarch64\":{\"signature\":\"${MACOS_AARCH64_SIG}\",\"url\":\"${BASE_URL}/${MACOS_AARCH64_NAME}\"},"
+          fi
+
+          if [ -n "$MACOS_X86_64_SIG" ]; then
+            PLATFORMS="${PLATFORMS}\"darwin-x86_64\":{\"signature\":\"${MACOS_X86_64_SIG}\",\"url\":\"${BASE_URL}/${MACOS_X86_64_NAME}\"},"
+          fi
+
+          if [ -n "$LINUX_X86_64_SIG" ]; then
+            PLATFORMS="${PLATFORMS}\"linux-x86_64\":{\"signature\":\"${LINUX_X86_64_SIG}\",\"url\":\"${BASE_URL}/${LINUX_X86_64_NAME}\"},"
+          fi
+
+          # Remove trailing comma and close
+          PLATFORMS="$(echo "$PLATFORMS" | sed 's/,$//')}"
+
+          cat > latest.json <<ENDJSON
+          {
+            "version": "${VERSION}",
+            "notes": "https://github.com/${REPO}/releases/tag/${GITHUB_REF_NAME}",
+            "pub_date": "${PUB_DATE}",
+            "platforms": ${PLATFORMS}
+          }
+          ENDJSON
+
+          echo "Generated latest.json:"
+          cat latest.json
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
@@ -152,3 +259,8 @@ jobs:
           files: |
             artifacts/macos/*.dmg
             artifacts/linux/*.AppImage
+            artifacts/macos-updater/*.tar.gz
+            artifacts/macos-updater/*.tar.gz.sig
+            artifacts/linux-updater/*.tar.gz
+            artifacts/linux-updater/*.tar.gz.sig
+            latest.json

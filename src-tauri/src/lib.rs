@@ -8,6 +8,7 @@ mod media_controls;
 mod equalizer;
 pub mod error;
 pub mod playlist_io;
+mod background_scan;
 
 #[cfg(target_os = "linux")]
 mod media_controls_mpris;
@@ -32,6 +33,7 @@ pub struct AppState {
     pub db: Database,
     pub audio: Arc<AudioController>,
     pub scan_cancelled: Arc<AtomicBool>,
+    pub scan_running: Arc<AtomicBool>,
     pub media_controls: Option<Arc<MediaControlsManager>>,
     pub media_control_event_sender: Option<mpsc::UnboundedSender<media_controls::MediaControlEvent>>,
     pub http_client: reqwest::Client,
@@ -100,8 +102,9 @@ pub fn run() {
         }
     };
 
-    // Initialize scan cancellation flag
+    // Initialize scan cancellation flag and running guard
     let scan_cancelled = Arc::new(AtomicBool::new(false));
+    let scan_running = Arc::new(AtomicBool::new(false));
 
     // Initialize media controls (may fail on unsupported platforms, that's OK)
     let (media_controls, media_control_receiver) = match MediaControlsManager::new() {
@@ -121,9 +124,16 @@ pub fn run() {
     let audio_for_position = Arc::clone(&audio);
     let media_controls_for_events = media_controls.clone();
 
+    // Clone references for background scanning
+    let db_for_bg_scan = Arc::clone(&db);
+    let scan_running_for_bg = Arc::clone(&scan_running);
+    let scan_cancelled_for_bg = Arc::clone(&scan_cancelled);
+
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .setup(move |app| {
             // Push-based position updates: emit position every ~1s when playing
             {
@@ -206,12 +216,22 @@ pub fn run() {
                     }
                 });
             }
+
+            // Launch background scanning (startup + periodic)
+            background_scan::start_background_scanning(
+                app.handle().clone(),
+                db_for_bg_scan,
+                scan_running_for_bg,
+                scan_cancelled_for_bg,
+            );
+
             Ok(())
         })
         .manage(AppState {
             db,
             audio,
             scan_cancelled,
+            scan_running,
             media_controls,
             media_control_event_sender,
             http_client,
@@ -267,7 +287,9 @@ pub fn run() {
             get_play_history,
             get_duplicates,
             export_playlist_m3u,
-            import_playlist_m3u
+            import_playlist_m3u,
+            get_scan_settings,
+            set_scan_settings
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

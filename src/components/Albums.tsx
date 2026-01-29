@@ -83,7 +83,8 @@ function AlbumDetail({ albumName, artist, onBack }: AlbumDetailProps) {
             {albumTracks.map((track, index) => (
               <tr
                 key={track.id}
-                className="hover:bg-bg-hover cursor-pointer transition-colors"
+                data-track-id={track.id}
+                className="hover:bg-bg-hover cursor-pointer transition-colors select-none"
                 onDoubleClick={() => playTrack(track.id)}
               >
                 <td className="p-4 text-text-tertiary">{track.track_number || index + 1}</td>

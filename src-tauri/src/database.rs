@@ -180,6 +180,14 @@ impl DatabaseInner {
             [],
         )?;
 
+        self.conn.execute(
+            "CREATE TABLE IF NOT EXISTS app_settings (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            )",
+            [],
+        )?;
+
         Ok(())
     }
 
@@ -1169,6 +1177,29 @@ impl DatabaseInner {
         }
 
         Ok(groups)
+    }
+
+    // App Settings
+
+    pub fn get_setting(&self, key: &str) -> SqlResult<Option<String>> {
+        let result = self.conn.query_row(
+            "SELECT value FROM app_settings WHERE key = ?1",
+            params![key],
+            |row| row.get::<_, String>(0),
+        );
+        match result {
+            Ok(value) => Ok(Some(value)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e),
+        }
+    }
+
+    pub fn set_setting(&mut self, key: &str, value: &str) -> SqlResult<()> {
+        self.conn.execute(
+            "INSERT OR REPLACE INTO app_settings (key, value) VALUES (?1, ?2)",
+            params![key, value],
+        )?;
+        Ok(())
     }
 
     // Find tracks by file path (for M3U import)

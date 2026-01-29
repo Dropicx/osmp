@@ -1,6 +1,6 @@
 {
   "name": "osmp",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Open Source Music Player",
   "license": "PolyForm-Noncommercial-1.0.0",
   "type": "module",
@@ -26,6 +26,8 @@
     "@tanstack/react-virtual": "^3.13.18",
     "@tauri-apps/api": "^2.0.0",
     "@tauri-apps/plugin-dialog": "^2.6.0",
+    "@tauri-apps/plugin-process": "^2.3.1",
+    "@tauri-apps/plugin-updater": "^2.9.0",
     "lucide-react": "^0.294.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",

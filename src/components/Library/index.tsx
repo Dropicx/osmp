@@ -1,6 +1,6 @@
 import { useEffect, useState, useMemo, useRef, useCallback } from 'react';
 import { useStore } from '../../store/useStore';
-import { X, Play, Pause } from 'lucide-react';
+import { X, Play, Pause, List, ListPlus } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { useDebounce } from '../../hooks/useDebounce';
 import { TOAST_TIMEOUT } from '../../constants';
@@ -28,6 +28,7 @@ export default function Library() {
     clearSelection,
     refreshCurrentTrack,
     addToQueue,
+    loadAlbums,
   } = useStore();
 
   const [fetchingMetadata, setFetchingMetadata] = useState(false);
@@ -66,12 +67,32 @@ export default function Library() {
   const debouncedSearch = useDebounce(searchQuery, 300);
   const tableContainerRef = useRef<HTMLDivElement>(null);
   const lastClickedIndexRef = useRef<number>(-1);
+  const clickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [showDuplicatesOnly, setShowDuplicatesOnly] = useState(false);
   const [duplicateIds, setDuplicateIds] = useState<Set<number>>(new Set());
 
   useEffect(() => {
     loadTracks();
   }, [loadTracks]);
+
+  // Clean up click timer on unmount
+  useEffect(() => {
+    return () => {
+      if (clickTimerRef.current) clearTimeout(clickTimerRef.current);
+    };
+  }, []);
+
+  // Cancel pending click timer when a drag starts (fired from useDragToPlaylist in App)
+  useEffect(() => {
+    const onDragStart = () => {
+      if (clickTimerRef.current) {
+        clearTimeout(clickTimerRef.current);
+        clickTimerRef.current = null;
+      }
+    };
+    document.addEventListener('osmp:drag-start', onDragStart);
+    return () => document.removeEventListener('osmp:drag-start', onDragStart);
+  }, []);
 
   // Handle keyboard shortcuts for select-all and delete-selected
   useEffect(() => {
@@ -230,24 +251,45 @@ export default function Library() {
 
   const handleRowClick = useCallback(
     (track: Track, index: number, e: React.MouseEvent) => {
-      if (e.shiftKey && lastClickedIndexRef.current >= 0) {
-        const start = Math.min(lastClickedIndexRef.current, index);
-        const end = Math.max(lastClickedIndexRef.current, index);
-        for (let i = start; i <= end; i++) {
-          const t = displayedTracks[i];
-          if (t && !selectedTracks.includes(t.id)) {
-            toggleTrackSelection(t.id);
+      const doSelection = () => {
+        if (e.shiftKey && lastClickedIndexRef.current >= 0) {
+          const start = Math.min(lastClickedIndexRef.current, index);
+          const end = Math.max(lastClickedIndexRef.current, index);
+          for (let i = start; i <= end; i++) {
+            const t = displayedTracks[i];
+            if (t && !selectedTracks.includes(t.id)) {
+              toggleTrackSelection(t.id);
+            }
           }
+        } else if (e.metaKey || e.ctrlKey) {
+          toggleTrackSelection(track.id);
+        } else {
+          clearSelection();
+          toggleTrackSelection(track.id);
         }
-      } else if (e.metaKey || e.ctrlKey) {
-        toggleTrackSelection(track.id);
+        lastClickedIndexRef.current = index;
+      };
+
+      // Defer single-click so a double-click can cancel it
+      if (e.shiftKey || e.metaKey || e.ctrlKey) {
+        doSelection();
       } else {
-        clearSelection();
-        toggleTrackSelection(track.id);
+        if (clickTimerRef.current) clearTimeout(clickTimerRef.current);
+        clickTimerRef.current = setTimeout(doSelection, 250);
       }
-      lastClickedIndexRef.current = index;
     },
     [displayedTracks, selectedTracks, toggleTrackSelection, clearSelection]
+  );
+
+  const handleRowDoubleClick = useCallback(
+    (track: Track) => {
+      if (clickTimerRef.current) {
+        clearTimeout(clickTimerRef.current);
+        clickTimerRef.current = null;
+      }
+      playTrack(track.id);
+    },
+    [playTrack]
   );
 
   const handleFetchMetadata = async () => {
@@ -260,6 +302,7 @@ export default function Library() {
         force: false,
       });
       await loadTracks(true);
+      await loadAlbums(true);
       await refreshCurrentTrack();
       clearSelection();
 
@@ -291,6 +334,7 @@ export default function Library() {
     try {
       await invoke('delete_tracks', { trackIds: selectedTracks });
       await loadTracks(true);
+      await loadAlbums(true);
       clearSelection();
     } catch {
       // Error handled silently
@@ -315,6 +359,7 @@ export default function Library() {
         trackIds: selectedTracks,
       });
       await loadTracks(true);
+      await loadAlbums(true);
       await refreshCurrentTrack();
 
       const success = results.filter((r) => r.success).length;
@@ -441,6 +486,37 @@ export default function Library() {
   const trailingColumns = useMemo<FixedColumn[]>(
     () => [
       {
+        id: 'queue-buttons',
+        width: 80,
+        headerContent: 'Queue',
+        renderCell: (track) => (
+          <div className="flex items-center gap-1">
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                addToQueue([track.id], 'end');
+              }}
+              className="btn-icon"
+              title="Add to Queue"
+              aria-label="Add to Queue"
+            >
+              <List size={14} className="text-text-tertiary" />
+            </button>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                addToQueue([track.id], 'next');
+              }}
+              className="btn-icon"
+              title="Add Next"
+              aria-label="Add Next"
+            >
+              <ListPlus size={14} className="text-text-tertiary" />
+            </button>
+          </div>
+        ),
+      },
+      {
         id: 'play-button',
         width: 48,
         renderCell: (track) => (
@@ -462,7 +538,7 @@ export default function Library() {
         ),
       },
     ],
-    [currentTrack?.id, isPlaying, handlePlayPause]
+    [currentTrack?.id, isPlaying, handlePlayPause, addToQueue]
   );
 
   if (loading) {
@@ -533,7 +609,7 @@ export default function Library() {
             sortConfig={sortConfig}
             onSort={handleSort}
             onRowClick={handleRowClick}
-            onRowDoubleClick={(track) => playTrack(track.id)}
+            onRowDoubleClick={handleRowDoubleClick}
             onRowContextMenu={(e, track) => handleContextMenu(e, track.id)}
             rowClassName={(track) =>
               `${selectedTracks.includes(track.id) ? 'bg-primary-600/10 border-l-2 border-l-primary-600' : ''}${
@@ -666,6 +742,7 @@ export default function Library() {
           onClose={() => setEditingTrack(null)}
           onSaved={async () => {
             await loadTracks(true);
+            await loadAlbums(true);
             await refreshCurrentTrack();
           }}
         />

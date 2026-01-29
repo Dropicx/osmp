@@ -14,6 +14,7 @@ export default function PlaylistsSidebar() {
     deletePlaylist,
     duplicatePlaylist,
     renamePlaylist,
+    clearSelection,
   } = useStore();
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [contextMenu, setContextMenu] = useState<{
@@ -29,6 +30,7 @@ export default function PlaylistsSidebar() {
   }, [loadPlaylists]);
 
   const handlePlaylistClick = async (playlist: Playlist) => {
+    clearSelection();
     setCurrentPlaylist(playlist);
     await loadPlaylistTracks(playlist.id);
   };
@@ -128,7 +130,8 @@ export default function PlaylistsSidebar() {
             playlists.map((playlist) => (
               <div
                 key={playlist.id}
-                className={`group relative px-4 py-2 rounded-lg mx-2 transition-colors ${
+                data-playlist-id={playlist.id}
+                className={`group relative px-4 py-2 rounded-lg mx-2 transition-colors select-none ${
                   currentPlaylist?.id === playlist.id
                     ? 'bg-primary-600/20 text-primary-400'
                     : 'hover:bg-bg-card text-text-secondary hover:text-text-primary'

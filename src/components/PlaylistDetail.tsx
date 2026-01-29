@@ -198,9 +198,6 @@ export default function PlaylistDetail({ playlistId, onBack }: PlaylistDetailPro
     pausePlayback,
     removeTrackFromPlaylist,
     reorderPlaylistTracks,
-    selectedTracks,
-    toggleTrackSelection,
-    clearSelection,
     addToQueue,
   } = useStore();
 
@@ -270,8 +267,8 @@ export default function PlaylistDetail({ playlistId, onBack }: PlaylistDetailPro
   const handleContextMenu = (e: React.MouseEvent, trackId: number) => {
     e.preventDefault();
     if (!selectedTrackIds.includes(trackId)) {
-      clearSelection();
-      toggleTrackSelection(trackId);
+      clearLocalSelection();
+      toggleLocalSelection(trackId);
     }
     setContextMenu({ x: e.clientX, y: e.clientY, trackId });
   };
@@ -282,9 +279,15 @@ export default function PlaylistDetail({ playlistId, onBack }: PlaylistDetailPro
     }
   }, [playlistId, loadPlaylistTracks]);
 
-  useEffect(() => {
-    setSelectedTrackIds(selectedTracks);
-  }, [selectedTracks]);
+  const toggleLocalSelection = useCallback((trackId: number) => {
+    setSelectedTrackIds((prev) =>
+      prev.includes(trackId) ? prev.filter((id) => id !== trackId) : [...prev, trackId]
+    );
+  }, []);
+
+  const clearLocalSelection = useCallback(() => {
+    setSelectedTrackIds([]);
+  }, []);
 
   const totalDuration = playlistTracks.reduce((sum, track) => sum + (track.duration || 0), 0);
 
@@ -314,7 +317,7 @@ export default function PlaylistDetail({ playlistId, onBack }: PlaylistDetailPro
       for (const trackId of selectedTrackIds) {
         await removeTrackFromPlaylist(playlistId, trackId);
       }
-      clearSelection();
+      clearLocalSelection();
     } catch {
       /* silently handled */
       alert('Failed to remove tracks from playlist');
@@ -430,7 +433,7 @@ export default function PlaylistDetail({ playlistId, onBack }: PlaylistDetailPro
             <Trash2 size={16} />
             Remove
           </button>
-          <button onClick={clearSelection} className="btn-tertiary">
+          <button onClick={clearLocalSelection} className="btn-tertiary">
             Clear
           </button>
         </div>
@@ -461,11 +464,11 @@ export default function PlaylistDetail({ playlistId, onBack }: PlaylistDetailPro
                   if (e.target.checked) {
                     playlistTracks.forEach((t) => {
                       if (!selectedTrackIds.includes(t.id)) {
-                        toggleTrackSelection(t.id);
+                        toggleLocalSelection(t.id);
                       }
                     });
                   } else {
-                    clearSelection();
+                    clearLocalSelection();
                   }
                 }}
                 aria-label="Select all tracks"
@@ -511,7 +514,7 @@ export default function PlaylistDetail({ playlistId, onBack }: PlaylistDetailPro
                     isCurrentTrack={currentTrack?.id === track.id}
                     isPlaying={isPlaying}
                     onPlayPause={handlePlayPause}
-                    onToggleSelection={toggleTrackSelection}
+                    onToggleSelection={toggleLocalSelection}
                     onRemove={handleRemoveTrack}
                     onContextMenu={handleContextMenu}
                     onPlayTrack={playTrack}

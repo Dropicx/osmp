@@ -46,6 +46,7 @@ export default memo(function TrackTableRow({
       onClick={(e) => onClick?.(track, index, e)}
       onDoubleClick={() => onDoubleClick?.(track, index)}
       onContextMenu={(e) => onContextMenu?.(e, track, index)}
+      data-track-id={track.id}
     >
       {leadingColumns.map((col) => (
         <td key={col.id} className={`p-4 ${col.cellClassName ?? ''}`}>

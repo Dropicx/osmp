@@ -89,6 +89,7 @@ export default function Player() {
         force: false,
       });
       await useStore.getState().refreshCurrentTrack();
+      await useStore.getState().loadAlbums(true);
     } catch {
       // Error handled silently
     } finally {
@@ -102,6 +103,8 @@ export default function Player() {
     setFetchingCovers(true);
     try {
       await invoke<CoverFetchResult[]>('fetch_covers', { trackIds: [currentTrack.id] });
+      await useStore.getState().refreshCurrentTrack();
+      await useStore.getState().loadAlbums(true);
     } catch {
       // Error handled silently
     } finally {
@@ -115,7 +118,8 @@ export default function Player() {
     try {
       await invoke('delete_track', { trackId: currentTrack.id });
       useStore.getState().stopPlayback();
-      useStore.getState().loadTracks(true);
+      await useStore.getState().loadTracks(true);
+      await useStore.getState().loadAlbums(true);
     } catch {
       // Error handled silently
     }
@@ -470,9 +474,10 @@ export default function Player() {
         <EditMetadataModal
           track={editingTrack}
           onClose={() => setEditingTrack(null)}
-          onSaved={() => {
+          onSaved={async () => {
             setEditingTrack(null);
-            useStore.getState().refreshCurrentTrack();
+            await useStore.getState().refreshCurrentTrack();
+            await useStore.getState().loadAlbums(true);
           }}
         />
       )}
