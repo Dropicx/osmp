@@ -86,6 +86,13 @@ export function useAutoUpdate() {
     return () => clearTimeout(timer);
   }, [checkForUpdate]);
 
+  // Auto-download when an update is found
+  useEffect(() => {
+    if (state.status === 'available') {
+      downloadAndInstall();
+    }
+  }, [state.status, downloadAndInstall]);
+
   return {
     ...state,
     checkForUpdate,

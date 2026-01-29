@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.2.2] - 2025-05-30
+
+### Fixed
+- Playlist delete confirmation modal on Linux (browser `confirm()` was non-blocking in WebKitGTK)
+- Auto-download updates immediately when detected instead of waiting for user click
+
 ## [0.2.0] - 2025-05-30
 
 ### Added
