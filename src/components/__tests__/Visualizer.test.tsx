@@ -136,7 +136,7 @@ describe('Visualizer', () => {
   });
 
   it('cleans up interval on unmount', () => {
-    const clearIntervalSpy = vi.spyOn(global, 'clearInterval');
+    const clearIntervalSpy = vi.spyOn(globalThis, 'clearInterval');
     const { unmount } = render(<Visualizer onClick={vi.fn()} />);
 
     unmount();
