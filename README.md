@@ -38,7 +38,7 @@ Download and run the latest AppImage in one command:
 
 ```bash
 curl -sL "$(curl -s https://api.github.com/repos/Dropicx/osmp/releases/latest \
-  | grep -o 'https://[^"]*\.AppImage')" -o OSMP.AppImage && chmod +x OSMP.AppImage && ./OSMP.AppImage
+  | grep -o 'https://[^"]*\.AppImage' | grep -v '\.sig' | head -1)" -o OSMP.AppImage && chmod +x OSMP.AppImage && ./OSMP.AppImage
 ```
 
 Or manually: download the `.AppImage` from the latest [GitHub Releases](https://github.com/Dropicx/osmp/releases), make it executable (`chmod +x OSMP-*.AppImage`), and run it.
