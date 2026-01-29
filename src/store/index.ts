@@ -42,33 +42,49 @@ export const useStore = create<AppState>()(
   )
 );
 
-// Set up media control event listeners
-export function setupMediaControlListeners() {
-  listen<boolean>('playback-state-changed', (event) => {
-    const newIsPlaying = event.payload;
-    const state = useStore.getState();
-    useStore.setState({ isPlaying: newIsPlaying });
-    if (newIsPlaying) {
-      state.startPositionTracking();
-    } else {
-      state.stopPositionTracking();
-    }
-  }).catch(() => {});
+// Set up media control event listeners (returns cleanup function)
+export function setupMediaControlListeners(): () => void {
+  const unlisteners: Promise<() => void>[] = [];
 
-  listen('media-control-next', () => {
-    useStore.getState().playNextTrack();
-  }).catch(() => {});
+  unlisteners.push(
+    listen<boolean>('playback-state-changed', (event) => {
+      const newIsPlaying = event.payload;
+      const state = useStore.getState();
+      useStore.setState({ isPlaying: newIsPlaying });
+      if (newIsPlaying) {
+        state.startPositionTracking();
+      } else {
+        state.stopPositionTracking();
+      }
+    })
+  );
 
-  listen('media-control-previous', () => {
-    useStore.getState().playPreviousTrack();
-  }).catch(() => {});
+  unlisteners.push(
+    listen('media-control-next', () => {
+      useStore.getState().playNextTrack();
+    })
+  );
 
-  listen<number>('media-control-seek', (event) => {
-    const position = event.payload;
-    invoke('seek_to_position', { position }).catch(() => {});
-  }).catch(() => {});
+  unlisteners.push(
+    listen('media-control-previous', () => {
+      useStore.getState().playPreviousTrack();
+    })
+  );
 
-  listen('media-control-stop', () => {
-    useStore.getState().stopPlayback();
-  }).catch(() => {});
+  unlisteners.push(
+    listen<number>('media-control-seek', (event) => {
+      const position = event.payload;
+      invoke('seek_to_position', { position }).catch(() => {});
+    })
+  );
+
+  unlisteners.push(
+    listen('media-control-stop', () => {
+      useStore.getState().stopPlayback();
+    })
+  );
+
+  return () => {
+    unlisteners.forEach((p) => p.then((fn) => fn()).catch(() => {}));
+  };
 }

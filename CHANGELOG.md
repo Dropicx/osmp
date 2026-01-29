@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.2.4] - 2025-05-30
+
+### Added
+- Batch size limits on backend commands (delete, metadata fetch, cover fetch, playlist add)
+- `audioLoaded` state to track whether the backend has audio loaded
+
+### Changed
+- README restructured: installation instructions first, build-from-source moved to its own section
+- Linux one-liner install command added to README
+- Media control event listeners now return cleanup functions to prevent leaks
+- Pause/play toggle now resumes playback correctly after app restart
+
+### Fixed
+- Media control listeners properly cleaned up on unmount
+
 ## [0.2.3] - 2025-05-30
 
 ### Fixed

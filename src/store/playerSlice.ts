@@ -11,6 +11,7 @@ const PLAY_HISTORY_THRESHOLD = 30; // seconds before recording play history
 export const createPlayerSlice: StateCreator<AppState, [], [], PlayerSlice> = (set, get) => ({
   currentTrack: null,
   isPlaying: false,
+  audioLoaded: false,
   volume: 1.0,
   position: 0,
   shuffleEnabled: false,
@@ -266,7 +267,7 @@ export const createPlayerSlice: StateCreator<AppState, [], [], PlayerSlice> = (s
       await invoke('play_track', { trackId });
       const track = get().tracks.find((t) => t.id === trackId);
       if (track) {
-        set({ currentTrack: track, isPlaying: true, position: 0 });
+        set({ currentTrack: track, isPlaying: true, audioLoaded: true, position: 0 });
         get().startPositionTracking();
 
         // Check cover cache first
@@ -291,8 +292,20 @@ export const createPlayerSlice: StateCreator<AppState, [], [], PlayerSlice> = (s
 
   pausePlayback: async () => {
     try {
+      const { isPlaying, audioLoaded, currentTrack, position } = get();
+
+      // After restart the UI still shows the last track, but the backend
+      // has no audio loaded.  Redirect to playTrack so the file is actually
+      // opened, then seek to the persisted position.
+      if (!isPlaying && !audioLoaded && currentTrack) {
+        await get().playTrack(currentTrack.id);
+        if (position > 0) {
+          await invoke('seek_to_position', { position });
+        }
+        return;
+      }
+
       await invoke('pause_playback');
-      const isPlaying = get().isPlaying;
       set({ isPlaying: !isPlaying });
 
       if (isPlaying) {
@@ -309,7 +322,7 @@ export const createPlayerSlice: StateCreator<AppState, [], [], PlayerSlice> = (s
     try {
       await invoke('stop_playback');
       get().stopPositionTracking();
-      set({ isPlaying: false, currentTrack: null, position: 0 });
+      set({ isPlaying: false, audioLoaded: false, currentTrack: null, position: 0 });
     } catch {
       // Stop error handled by error boundary
     }

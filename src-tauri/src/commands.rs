@@ -14,6 +14,9 @@ use std::sync::atomic::Ordering;
 use std::sync::{Arc, MutexGuard};
 use tauri::{Manager, State};
 
+/// Maximum number of track IDs accepted in a single batch command.
+const MAX_BATCH_SIZE: usize = 10_000;
+
 /// Lock the database mutex. See `database.rs` for deadlock risk rationale.
 fn lock_db(state: &AppState) -> Result<MutexGuard<'_, DatabaseInner>, String> {
     state.db.lock().map_err(|e| {
@@ -185,6 +188,9 @@ pub async fn fetch_metadata(
     track_ids: Vec<i64>,
     _force: bool,
 ) -> Result<Vec<MetadataResult>, String> {
+    if track_ids.len() > 100 {
+        return Err("Cannot fetch metadata for more than 100 tracks at once".to_string());
+    }
     let fetcher = MetadataFetcher::with_client(Arc::clone(&state.db), state.http_client.clone());
 
     let mut results = Vec::new();
@@ -338,6 +344,9 @@ pub async fn delete_track(state: State<'_, AppState>, track_id: i64) -> Result<(
 
 #[tauri::command]
 pub async fn delete_tracks(state: State<'_, AppState>, track_ids: Vec<i64>) -> Result<(), String> {
+    if track_ids.len() > MAX_BATCH_SIZE {
+        return Err(format!("Cannot delete more than {} tracks at once", MAX_BATCH_SIZE));
+    }
     let result = lock_db(&state)?.delete_tracks(&track_ids);
     result.map_err(sanitize_err("Deleting tracks"))
 }
@@ -444,6 +453,9 @@ pub async fn fetch_covers(
     state: State<'_, AppState>,
     track_ids: Vec<i64>,
 ) -> Result<Vec<crate::models::CoverFetchResult>, String> {
+    if track_ids.len() > 100 {
+        return Err("Cannot fetch covers for more than 100 tracks at once".to_string());
+    }
     use crate::models::CoverFetchResult;
 
     let mut results = Vec::new();
@@ -785,6 +797,9 @@ pub async fn add_tracks_to_playlist(
     playlist_id: i64,
     track_ids: Vec<i64>,
 ) -> Result<(), String> {
+    if track_ids.len() > MAX_BATCH_SIZE {
+        return Err(format!("Cannot add more than {} tracks at once", MAX_BATCH_SIZE));
+    }
     lock_db(&state)?
         .add_tracks_to_playlist_batch(playlist_id, &track_ids)
         .map_err(sanitize_err("Adding to playlist"))

@@ -30,37 +30,22 @@ OSMP is a modern, local-first music player for **macOS and Linux**. It features 
 - **Metadata**: MusicBrainz API, Cover Art Archive
 - **Media Controls**: MPRIS (Linux), macOS Media Remote
 
-## Prerequisites
-
-**All platforms (for building from source):**
-
-- Node.js v18 or higher
-- Rust (latest stable)
-- npm or yarn
-
-**macOS:** Xcode Command Line Tools (for building). Install with: `xcode-select --install` if needed.
-
-**Linux:** System packages required for Tauri/WebKit. On Ubuntu or Debian:
-
-```bash
-sudo apt-get update
-sudo apt-get install -y \
-  libwebkit2gtk-4.1-dev \
-  libappindicator3-dev \
-  librsvg2-dev \
-  libssl-dev \
-  libasound2-dev \
-  patchelf
-```
-
 ## Installation
 
-### Option A – Pre-built (recommended)
+### Linux
 
-- **macOS**: Download the `.dmg` from the latest [GitHub Releases](https://github.com/Dropicx/osmp/releases), open it, and drag OSMP to Applications. See [macOS Gatekeeper notice](#macos-gatekeeper-notice) below.
-- **Linux**: Download the `.AppImage` from [Releases](https://github.com/Dropicx/osmp/releases), make it executable (`chmod +x OSMP-*.AppImage`), then run it.
+Download and run the latest AppImage in one command:
 
-The app can update itself via the in-app updater when new releases are published.
+```bash
+curl -sL "$(curl -s https://api.github.com/repos/Dropicx/osmp/releases/latest \
+  | grep -o 'https://[^"]*\.AppImage')" -o OSMP.AppImage && chmod +x OSMP.AppImage && ./OSMP.AppImage
+```
+
+Or manually: download the `.AppImage` from the latest [GitHub Releases](https://github.com/Dropicx/osmp/releases), make it executable (`chmod +x OSMP-*.AppImage`), and run it.
+
+### macOS
+
+Download the `.dmg` from the latest [GitHub Releases](https://github.com/Dropicx/osmp/releases), open it, and drag OSMP to Applications. See [macOS Gatekeeper notice](#macos-gatekeeper-notice) below.
 
 #### macOS Gatekeeper notice
 
@@ -86,7 +71,36 @@ You only need to do this once. After the first launch, macOS will remember your 
 2. Go to **System Settings > Privacy & Security**
 3. Scroll down and click **Open Anyway** next to the OSMP message
 
-### Option B – From source (macOS and Linux)
+### Updates
+
+The app can update itself via the in-app updater when new releases are published.
+
+## Building from Source
+
+### Prerequisites
+
+**All platforms:**
+
+- Node.js v18 or higher
+- Rust (latest stable)
+- npm or yarn
+
+**macOS:** Xcode Command Line Tools. Install with: `xcode-select --install` if needed.
+
+**Linux:** System packages required for Tauri/WebKit. On Ubuntu or Debian:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y \
+  libwebkit2gtk-4.1-dev \
+  libappindicator3-dev \
+  librsvg2-dev \
+  libssl-dev \
+  libasound2-dev \
+  patchelf
+```
+
+### Development
 
 1. Clone the repository:
 
@@ -107,13 +121,9 @@ npm install
 npm run tauri dev
 ```
 
-Or build a production bundle (see [Building](#building)).
-
 For a step-by-step first-time guide and troubleshooting, see [QUICKSTART.md](QUICKSTART.md).
 
-## Building
-
-From the project root:
+### Production Build
 
 ```bash
 npm run build

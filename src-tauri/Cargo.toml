@@ -1,6 +1,6 @@
 [package]
 name = "osmp"
-version = "0.2.3"
+version = "0.2.4"
 description = "Open Source Music Player"
 license = "MIT"
 authors = ["Dropicx"]

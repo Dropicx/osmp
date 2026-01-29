@@ -11,6 +11,7 @@ export interface QueueItem {
 export interface PlayerSlice {
   currentTrack: Track | null;
   isPlaying: boolean;
+  audioLoaded: boolean;
   volume: number;
   position: number;
   shuffleEnabled: boolean;
