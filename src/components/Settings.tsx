@@ -646,7 +646,7 @@ export default function Settings() {
         <h2 className="text-xl font-semibold mb-4 text-text-primary">About</h2>
         <div className="space-y-2 text-sm text-text-secondary">
           <p>
-            <span className="text-text-tertiary">Version:</span> 0.1.0
+            <span className="text-text-tertiary">Version:</span> 0.1.1
           </p>
           <p>
             <span className="text-text-tertiary">Built with:</span> Tauri, React, Rust
