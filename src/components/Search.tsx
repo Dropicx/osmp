@@ -9,22 +9,20 @@ import type { FixedColumn } from './TrackTable';
 export default function Search() {
   const { tracks, searchTracks, playTrack, addToQueue, loadTracks } = useStore();
   const [query, setQuery] = useState('');
-  const [hasSearched, setHasSearched] = useState(false);
   const { contextMenu, getMenuPosition, openContextMenu, closeContextMenu } = useContextMenu(200);
   const inputRef = useRef<HTMLInputElement>(null);
   const debouncedQuery = useDebounce(query, 300);
+  const hasSearched = debouncedQuery.trim().length > 0;
 
   // Debounced live search - triggers on typing after 300ms
   useEffect(() => {
     if (debouncedQuery.trim()) {
       searchTracks(debouncedQuery);
-      setHasSearched(true);
-    } else if (hasSearched) {
+    } else {
       // Reset to full library when query is cleared
       loadTracks(true);
-      setHasSearched(false);
     }
-  }, [debouncedQuery, searchTracks, loadTracks, hasSearched]);
+  }, [debouncedQuery, searchTracks, loadTracks]);
 
   // Listen for Ctrl/Cmd+F focus event
   useEffect(() => {
@@ -41,7 +39,6 @@ export default function Search() {
     e.preventDefault();
     if (query.trim()) {
       searchTracks(query);
-      setHasSearched(true);
     }
   };
 
@@ -145,6 +142,8 @@ export default function Search() {
           style={getMenuPosition()}
           onClick={(e) => e.stopPropagation()}
           role="menu"
+          tabIndex={-1}
+          onKeyDown={(e) => e.stopPropagation()}
           aria-label="Track context menu"
         >
           <button

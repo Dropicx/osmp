@@ -102,6 +102,7 @@ function AlbumDetail({ albumName, artist, onBack }: AlbumDetailProps) {
                       }}
                       className="btn-icon"
                       title="Add to Queue"
+                      aria-label="Add to Queue"
                     >
                       <List size={14} className="text-text-tertiary" />
                     </button>
@@ -112,6 +113,7 @@ function AlbumDetail({ albumName, artist, onBack }: AlbumDetailProps) {
                       }}
                       className="btn-icon"
                       title="Add Next to Queue"
+                      aria-label="Add Next to Queue"
                     >
                       <ListPlus size={14} className="text-text-tertiary" />
                     </button>
@@ -173,7 +175,15 @@ export default function Albums() {
           <div
             key={`${album.name}-${album.artist || ''}`}
             className="bg-bg-card rounded-xl p-4 hover:bg-bg-hover transition-all cursor-pointer group border border-bg-surface hover:border-primary-600/30 hover:shadow-lg hover:shadow-primary-600/10"
+            role="button"
+            tabIndex={0}
             onClick={() => setSelectedAlbum({ name: album.name, artist: album.artist })}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                setSelectedAlbum({ name: album.name, artist: album.artist });
+              }
+            }}
           >
             <div className="aspect-square bg-gradient-to-br from-primary-600/20 to-accent-600/20 rounded-xl mb-3 flex items-center justify-center group-hover:from-primary-600/30 group-hover:to-accent-600/30 transition-all relative overflow-hidden">
               {album.cover_art ? (
@@ -186,6 +196,7 @@ export default function Albums() {
                 <Music size={32} className="text-primary-400" />
               )}
               <button
+                aria-label="Play album"
                 className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-black/60 rounded-xl backdrop-blur-sm"
                 onClick={(e) => {
                   e.stopPropagation();

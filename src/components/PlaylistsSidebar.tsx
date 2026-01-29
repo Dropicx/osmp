@@ -148,7 +148,7 @@ export default function PlaylistsSidebar() {
                       }
                     }}
                     className="w-full bg-bg-elevated border border-primary-500 rounded px-2 py-1 text-sm text-text-primary focus:outline-none"
-                    autoFocus
+                    autoFocus // eslint-disable-line jsx-a11y/no-autofocus
                     onClick={(e) => e.stopPropagation()}
                   />
                 ) : (
@@ -183,7 +183,11 @@ export default function PlaylistsSidebar() {
 
       {contextMenu && (
         <>
-          <div className="fixed inset-0 z-40" onClick={() => setContextMenu(null)} />
+          <div
+            className="fixed inset-0 z-40"
+            role="presentation"
+            onClick={() => setContextMenu(null)}
+          />
           <div
             className="fixed z-50 bg-bg-card border border-bg-surface rounded-lg shadow-xl py-1 min-w-[160px]"
             style={{

@@ -40,6 +40,9 @@ export default function LibraryContextMenu({
       style={position}
       onClick={(e) => e.stopPropagation()}
       role="menu"
+      tabIndex={-1}
+      onKeyDown={(e) => e.stopPropagation()}
+      aria-label="Track context menu"
     >
       <button
         onClick={onPlay}

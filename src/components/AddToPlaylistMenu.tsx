@@ -80,10 +80,10 @@ export default function AddToPlaylistMenu({
       setTimeout(() => {
         onClose();
       }, 800);
-    } catch (error: any) {
+    } catch (error: unknown) {
       /* silently handled */
       setToast({
-        message: error.message || 'Failed to add tracks',
+        message: error instanceof Error ? error.message : 'Failed to add tracks',
         type: 'error',
       });
       setTimeout(() => setToast(null), 3000);

@@ -186,7 +186,15 @@ export default function Dashboard() {
                 <div
                   key={`${album.name}-${album.artist || ''}`}
                   className="bg-bg-card rounded-xl p-4 hover:bg-bg-hover transition-all cursor-pointer group border border-bg-surface hover:border-primary-600/30 hover:shadow-lg hover:shadow-primary-600/10"
+                  role="button"
+                  tabIndex={0}
                   onClick={() => setSelectedAlbum({ name: album.name, artist: album.artist })}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      setSelectedAlbum({ name: album.name, artist: album.artist });
+                    }
+                  }}
                 >
                   <div className="aspect-square bg-gradient-to-br from-primary-600/20 to-accent-600/20 rounded-xl mb-3 flex items-center justify-center group-hover:from-primary-600/30 group-hover:to-accent-600/30 transition-all relative overflow-hidden">
                     {album.cover_art ? (
@@ -240,7 +248,15 @@ export default function Dashboard() {
                         <div
                           key={track.id}
                           className="bg-bg-card rounded-xl p-4 hover:bg-bg-hover transition-all cursor-pointer group border border-bg-surface hover:border-primary-600/30 hover:shadow-lg hover:shadow-primary-600/10"
+                          role="button"
+                          tabIndex={0}
                           onClick={() => playTrack(track.id)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' || e.key === ' ') {
+                              e.preventDefault();
+                              playTrack(track.id);
+                            }
+                          }}
                         >
                           <div className="aspect-square bg-gradient-to-br from-primary-600/20 to-accent-600/20 rounded-xl mb-3 flex items-center justify-center group-hover:from-primary-600/30 group-hover:to-accent-600/30 transition-all relative overflow-hidden">
                             {album?.cover_art ? (

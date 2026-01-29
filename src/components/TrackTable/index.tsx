@@ -28,6 +28,7 @@ export default function TrackTable({
   const totalTrailingWidth = trailingColumns.reduce((sum, col) => sum + col.width, 0);
   const totalColCount = leadingColumns.length + visibleColumns.length + trailingColumns.length;
 
+  // eslint-disable-next-line react-hooks/incompatible-library
   const rowVirtualizer = useVirtualizer({
     count: virtualized ? tracks.length : 0,
     getScrollElement: () => scrollContainerRef?.current ?? null,
@@ -119,6 +120,7 @@ export default function TrackTable({
           <>
             {paddingTop > 0 && (
               <tr>
+                {/* eslint-disable-next-line jsx-a11y/control-has-associated-label */}
                 <td
                   colSpan={totalColCount}
                   style={{ height: paddingTop, padding: 0, border: 'none' }}
@@ -144,6 +146,7 @@ export default function TrackTable({
             })}
             {paddingBottom > 0 && (
               <tr>
+                {/* eslint-disable-next-line jsx-a11y/control-has-associated-label */}
                 <td
                   colSpan={totalColCount}
                   style={{ height: paddingBottom, padding: 0, border: 'none' }}

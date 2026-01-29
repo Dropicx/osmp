@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { X } from 'lucide-react';
 import { useStore } from '../store/useStore';
 
@@ -18,11 +18,15 @@ export default function CreatePlaylistDialog({
   const [error, setError] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
 
+  const handleClose = useCallback(() => {
+    setName('');
+    setError('');
+    onClose();
+  }, [onClose]);
+
+  // Focus input when dialog opens
   useEffect(() => {
     if (isOpen) {
-      setName('');
-      setError('');
-      // Focus input when dialog opens
       setTimeout(() => inputRef.current?.focus(), 100);
     }
   }, [isOpen]);
@@ -47,14 +51,14 @@ export default function CreatePlaylistDialog({
       setName('');
       onCreated?.(playlistId);
       onClose();
-    } catch (err: any) {
-      setError(err.message || 'Failed to create playlist');
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Failed to create playlist');
     }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Escape') {
-      onClose();
+      handleClose();
     }
   };
 
@@ -63,12 +67,17 @@ export default function CreatePlaylistDialog({
   return (
     <div
       className="fixed inset-0 bg-black/50 flex items-center justify-center z-50"
-      onClick={onClose}
+      role="presentation"
+      onClick={handleClose}
       onKeyDown={handleKeyDown}
     >
+      {/* eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions */}
       <div
         className="bg-bg-card rounded-2xl p-6 w-full max-w-md border border-bg-surface shadow-xl"
+        role="dialog"
+        aria-label="Create playlist"
         onClick={(e) => e.stopPropagation()}
+        onKeyDown={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-2xl font-bold text-text-primary">Create Playlist</h2>

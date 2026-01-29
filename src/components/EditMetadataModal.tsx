@@ -67,7 +67,11 @@ export default function EditMetadataModal({ track, onClose, onSaved }: EditMetad
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
       {/* Backdrop */}
-      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
+      <div
+        className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+        role="presentation"
+        onClick={onClose}
+      />
 
       {/* Modal */}
       <div className="relative bg-bg-card border border-bg-surface rounded-2xl shadow-2xl w-full max-w-lg mx-4 overflow-hidden animate-slide-up">
@@ -95,8 +99,11 @@ export default function EditMetadataModal({ track, onClose, onSaved }: EditMetad
           {/* Form fields */}
           <div className="grid grid-cols-2 gap-4">
             <div className="col-span-2">
-              <label className="block text-sm text-text-tertiary mb-1">Title</label>
+              <label htmlFor="edit-title" className="block text-sm text-text-tertiary mb-1">
+                Title
+              </label>
               <input
+                id="edit-title"
                 type="text"
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
@@ -106,8 +113,11 @@ export default function EditMetadataModal({ track, onClose, onSaved }: EditMetad
             </div>
 
             <div className="col-span-2">
-              <label className="block text-sm text-text-tertiary mb-1">Artist</label>
+              <label htmlFor="edit-artist" className="block text-sm text-text-tertiary mb-1">
+                Artist
+              </label>
               <input
+                id="edit-artist"
                 type="text"
                 value={artist}
                 onChange={(e) => setArtist(e.target.value)}
@@ -117,8 +127,11 @@ export default function EditMetadataModal({ track, onClose, onSaved }: EditMetad
             </div>
 
             <div className="col-span-2">
-              <label className="block text-sm text-text-tertiary mb-1">Album</label>
+              <label htmlFor="edit-album" className="block text-sm text-text-tertiary mb-1">
+                Album
+              </label>
               <input
+                id="edit-album"
                 type="text"
                 value={album}
                 onChange={(e) => setAlbum(e.target.value)}
@@ -128,8 +141,11 @@ export default function EditMetadataModal({ track, onClose, onSaved }: EditMetad
             </div>
 
             <div>
-              <label className="block text-sm text-text-tertiary mb-1">Year</label>
+              <label htmlFor="edit-year" className="block text-sm text-text-tertiary mb-1">
+                Year
+              </label>
               <input
+                id="edit-year"
                 type="number"
                 value={year}
                 onChange={(e) => setYear(e.target.value)}
@@ -141,8 +157,11 @@ export default function EditMetadataModal({ track, onClose, onSaved }: EditMetad
             </div>
 
             <div>
-              <label className="block text-sm text-text-tertiary mb-1">Track #</label>
+              <label htmlFor="edit-track-number" className="block text-sm text-text-tertiary mb-1">
+                Track #
+              </label>
               <input
+                id="edit-track-number"
                 type="number"
                 value={trackNumber}
                 onChange={(e) => setTrackNumber(e.target.value)}
@@ -153,8 +172,11 @@ export default function EditMetadataModal({ track, onClose, onSaved }: EditMetad
             </div>
 
             <div className="col-span-2">
-              <label className="block text-sm text-text-tertiary mb-1">Genre</label>
+              <label htmlFor="edit-genre" className="block text-sm text-text-tertiary mb-1">
+                Genre
+              </label>
               <input
+                id="edit-genre"
                 type="text"
                 value={genre}
                 onChange={(e) => setGenre(e.target.value)}
@@ -166,9 +188,11 @@ export default function EditMetadataModal({ track, onClose, onSaved }: EditMetad
 
           {/* Write to file option */}
           <div className="p-3 bg-bg-elevated rounded-lg border border-bg-surface">
-            <label className="flex items-start gap-3 cursor-pointer">
+            {/* eslint-disable-next-line jsx-a11y/label-has-associated-control */}
+            <label htmlFor="write-to-file" className="flex items-start gap-3 cursor-pointer">
               <div className="pt-0.5">
                 <input
+                  id="write-to-file"
                   type="checkbox"
                   checked={writeToFile}
                   onChange={(e) => setWriteToFile(e.target.checked)}

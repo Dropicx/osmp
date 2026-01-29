@@ -163,15 +163,30 @@ export default function Settings() {
     resetColumnVisibility,
   } = useStore();
 
-  useEffect(() => {
-    loadFolders();
+  const loadFolders = async () => {
+    try {
+      const folders = await invoke<ScanFolder[]>('get_scan_folders');
+      setFolders(folders);
+    } catch {
+      /* silently handled */
+    }
+  };
 
-    // Subscribe to scan discovery events (file collection phase)
+  // Load folders on mount
+  useEffect(() => {
+    invoke<ScanFolder[]>('get_scan_folders')
+      .then(setFolders)
+      .catch(() => {
+        /* silently handled */
+      });
+  }, []);
+
+  // Subscribe to scan events
+  useEffect(() => {
     const unlistenDiscovery = listen<ScanDiscovery>('scan-discovery', (event) => {
       setDiscovery(event.payload);
     });
 
-    // Subscribe to scan progress events (processing phase)
     const unlistenProgress = listen<ScanProgress>('scan-progress', (event) => {
       setProgress(event.payload);
       if (event.payload.is_complete) {
@@ -185,15 +200,6 @@ export default function Settings() {
       unlistenProgress.then((fn) => fn());
     };
   }, []);
-
-  const loadFolders = async () => {
-    try {
-      const folders = await invoke<ScanFolder[]>('get_scan_folders');
-      setFolders(folders);
-    } catch {
-      /* silently handled */
-    }
-  };
 
   const handleAddFolder = async () => {
     try {
@@ -477,7 +483,10 @@ export default function Settings() {
         <div className="space-y-4">
           <div className="flex items-start justify-between">
             <div className="flex-1">
-              <label className="block text-sm font-semibold mb-2 text-text-primary">
+              <label
+                htmlFor="toggle-visualizer"
+                className="block text-sm font-semibold mb-2 text-text-primary"
+              >
                 Audio Visualizer
               </label>
               <p className="text-sm text-text-tertiary">
@@ -487,9 +496,11 @@ export default function Settings() {
             </div>
             <label className="toggle-switch ml-6 flex-shrink-0">
               <input
+                id="toggle-visualizer"
                 type="checkbox"
                 checked={visualizerEnabled}
                 onChange={(e) => setVisualizerEnabled(e.target.checked)}
+                aria-label="Audio Visualizer"
               />
               <span className="toggle-slider"></span>
             </label>
@@ -498,7 +509,10 @@ export default function Settings() {
           {visualizerEnabled && (
             <div className="flex items-center justify-between pt-2">
               <div className="flex-1">
-                <label className="block text-sm font-semibold mb-2 text-text-primary">
+                <label
+                  htmlFor="slider-visualizer-opacity"
+                  className="block text-sm font-semibold mb-2 text-text-primary"
+                >
                   Visualizer Opacity
                 </label>
                 <p className="text-sm text-text-tertiary">
@@ -507,6 +521,7 @@ export default function Settings() {
               </div>
               <div className="flex items-center gap-3 ml-6 flex-shrink-0">
                 <input
+                  id="slider-visualizer-opacity"
                   type="range"
                   min={1}
                   max={100}
@@ -532,13 +547,20 @@ export default function Settings() {
         <div className="space-y-4">
           {COLUMN_DEFINITIONS.map((col) => (
             <div key={col.id} className="flex items-center justify-between">
-              <label className="text-sm font-medium text-text-primary">{col.label}</label>
+              <label
+                htmlFor={`toggle-col-${col.id}`}
+                className="text-sm font-medium text-text-primary"
+              >
+                {col.label}
+              </label>
               <label className="toggle-switch">
                 <input
+                  id={`toggle-col-${col.id}`}
                   type="checkbox"
                   checked={columnVisibility[col.id]}
                   disabled={col.id === 'title'}
                   onChange={(e) => setColumnVisibility(col.id, e.target.checked)}
+                  aria-label={`Toggle ${col.label} column`}
                 />
                 <span className="toggle-slider"></span>
               </label>
@@ -564,7 +586,10 @@ export default function Settings() {
         <div className="space-y-4">
           <div className="flex items-start justify-between">
             <div className="flex-1">
-              <label className="block text-sm font-semibold mb-2 text-text-primary">
+              <label
+                htmlFor="toggle-auto-fetch"
+                className="block text-sm font-semibold mb-2 text-text-primary"
+              >
                 Auto-fetch metadata
               </label>
               <p className="text-sm text-text-tertiary">
@@ -572,7 +597,12 @@ export default function Settings() {
               </p>
             </div>
             <label className="toggle-switch ml-6 flex-shrink-0">
-              <input type="checkbox" defaultChecked={false} />
+              <input
+                id="toggle-auto-fetch"
+                type="checkbox"
+                defaultChecked={false}
+                aria-label="Auto-fetch metadata"
+              />
               <span className="toggle-slider"></span>
             </label>
           </div>

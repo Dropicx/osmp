@@ -21,36 +21,6 @@ export default function Visualizer({ onClick }: VisualizerProps) {
   const isPlaying = useIsPlaying();
   const visualizerOpacity = useStore((s) => s.visualizerOpacity);
 
-  // Poll backend for real frequency data
-  useEffect(() => {
-    if (isPlaying) {
-      pollRef.current = setInterval(async () => {
-        try {
-          const levels = await invoke<number[]>('get_visualizer_data');
-          if (levels && levels.length === BAR_COUNT) {
-            for (let i = 0; i < BAR_COUNT; i++) {
-              targetBarsRef.current[i] = levels[i];
-            }
-          }
-        } catch {
-          // Silently ignore poll errors
-        }
-      }, POLL_INTERVAL);
-    } else {
-      // When paused, target all bars to zero
-      for (let i = 0; i < BAR_COUNT; i++) {
-        targetBarsRef.current[i] = 0;
-      }
-    }
-
-    return () => {
-      if (pollRef.current) {
-        clearInterval(pollRef.current);
-        pollRef.current = null;
-      }
-    };
-  }, [isPlaying]);
-
   const animate = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -102,7 +72,38 @@ export default function Visualizer({ onClick }: VisualizerProps) {
       ctx.fill();
     }
 
+    // eslint-disable-next-line react-hooks/immutability
     animationRef.current = requestAnimationFrame(animate);
+  }, [isPlaying]);
+
+  // Poll backend for real frequency data
+  useEffect(() => {
+    if (isPlaying) {
+      pollRef.current = setInterval(async () => {
+        try {
+          const levels = await invoke<number[]>('get_visualizer_data');
+          if (levels && levels.length === BAR_COUNT) {
+            for (let i = 0; i < BAR_COUNT; i++) {
+              targetBarsRef.current[i] = levels[i];
+            }
+          }
+        } catch {
+          // Silently ignore poll errors
+        }
+      }, POLL_INTERVAL);
+    } else {
+      // When paused, target all bars to zero
+      for (let i = 0; i < BAR_COUNT; i++) {
+        targetBarsRef.current[i] = 0;
+      }
+    }
+
+    return () => {
+      if (pollRef.current) {
+        clearInterval(pollRef.current);
+        pollRef.current = null;
+      }
+    };
   }, [isPlaying]);
 
   useEffect(() => {

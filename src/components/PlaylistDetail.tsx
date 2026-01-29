@@ -88,12 +88,23 @@ function SortableTrackRow({
       </div>
 
       {/* Checkbox */}
-      <label className="custom-checkbox" onClick={(e) => e.stopPropagation()}>
+      {/* eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions */}
+      <label
+        className="custom-checkbox"
+        onClick={(e) => e.stopPropagation()}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            onToggleSelection(track.id);
+          }
+        }}
+      >
         <input
           type="checkbox"
           checked={isSelected}
           onChange={() => onToggleSelection(track.id)}
           onClick={(e) => e.stopPropagation()}
+          aria-label="Select track"
         />
         <span className="checkmark"></span>
       </label>
@@ -457,6 +468,7 @@ export default function PlaylistDetail({ playlistId, onBack }: PlaylistDetailPro
                     clearSelection();
                   }
                 }}
+                aria-label="Select all tracks"
               />
               <span className="checkmark"></span>
             </label>
@@ -522,6 +534,8 @@ export default function PlaylistDetail({ playlistId, onBack }: PlaylistDetailPro
           style={getContextMenuPosition()}
           onClick={(e) => e.stopPropagation()}
           role="menu"
+          tabIndex={-1}
+          onKeyDown={(e) => e.stopPropagation()}
           aria-label="Track context menu"
         >
           <button

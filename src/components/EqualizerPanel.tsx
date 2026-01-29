@@ -52,7 +52,11 @@ export default function EqualizerPanel() {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
       {/* Backdrop */}
-      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={handleClose} />
+      <div
+        className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+        role="presentation"
+        onClick={handleClose}
+      />
 
       {/* Panel */}
       <div className="relative bg-bg-elevated rounded-2xl shadow-2xl border border-bg-surface w-[520px] max-w-[90vw] overflow-hidden">
@@ -77,6 +81,7 @@ export default function EqualizerPanel() {
                 type="checkbox"
                 checked={eqSettings.enabled}
                 onChange={(e) => setEqEnabled(e.target.checked)}
+                aria-label="Enable equalizer"
               />
               <span className="toggle-slider"></span>
             </label>

@@ -32,7 +32,7 @@ import {
 type View = 'dashboard' | 'library' | 'albums' | 'search' | 'settings' | 'playlist';
 
 function App() {
-  const [currentView, setCurrentView] = useState<View>('dashboard');
+  const [selectedView, setSelectedView] = useState<View>('dashboard');
   const currentTrack = useCurrentTrack();
   const currentCoverArt = useCurrentCoverArt();
   const { visualizerEnabled } = useVisualizerState();
@@ -55,12 +55,8 @@ function App() {
     loadAlbums();
   }, [loadEqSettings, loadTracks, loadAlbums]);
 
-  // Update view when playlist is selected/deselected
-  useEffect(() => {
-    if (currentPlaylist) {
-      setCurrentView('playlist');
-    }
-  }, [currentPlaylist]);
+  // Derive currentView from selectedView and currentPlaylist
+  const currentView = currentPlaylist ? 'playlist' : selectedView;
 
   const navItems = [
     { id: 'dashboard' as View, label: 'Dashboard', icon: LayoutDashboard },
@@ -85,7 +81,7 @@ function App() {
                   <li key={item.id}>
                     <button
                       onClick={() => {
-                        setCurrentView(item.id);
+                        setSelectedView(item.id);
                         setCurrentPlaylist(null);
                       }}
                       className={`w-full text-left px-4 py-3 rounded-xl transition-all duration-200 flex items-center gap-3 ${
@@ -149,7 +145,7 @@ function App() {
                   playlistId={currentPlaylist.id}
                   onBack={() => {
                     setCurrentPlaylist(null);
-                    setCurrentView('dashboard');
+                    setSelectedView('dashboard');
                   }}
                 />
               )}

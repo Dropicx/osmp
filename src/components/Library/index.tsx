@@ -368,7 +368,8 @@ export default function Library() {
   const handleFilterChange = (key: keyof TrackFilters, value: string | number | undefined) => {
     setFilters((prev) => {
       if (value === undefined || value === '') {
-        const { [key]: _, ...rest } = prev;
+        const rest = { ...prev };
+        delete rest[key];
         return rest;
       }
       return { ...prev, [key]: value };
@@ -406,11 +407,22 @@ export default function Library() {
           </label>
         ),
         renderCell: (track) => (
-          <label className="custom-checkbox" onClick={(e) => e.stopPropagation()}>
+          // eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions
+          <label
+            className="custom-checkbox"
+            onClick={(e) => e.stopPropagation()}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                toggleTrackSelection(track.id);
+              }
+            }}
+          >
             <input
               type="checkbox"
               checked={selectedTracks.includes(track.id)}
               onChange={() => toggleTrackSelection(track.id)}
+              aria-label="Select track"
             />
             <span className="checkmark"></span>
           </label>

@@ -357,10 +357,25 @@ export default function Player() {
             onMouseMove={handleProgressHover}
             onMouseLeave={handleProgressLeave}
             role="slider"
+            tabIndex={0}
             aria-label="Playback progress"
             aria-valuenow={Math.floor(position)}
             aria-valuemin={0}
             aria-valuemax={currentTrack?.duration || 0}
+            onKeyDown={async (e) => {
+              if (!currentTrack?.duration) return;
+              let seekTime: number | null = null;
+              if (e.key === 'ArrowRight') seekTime = Math.min(position + 5, currentTrack.duration);
+              else if (e.key === 'ArrowLeft') seekTime = Math.max(position - 5, 0);
+              if (seekTime !== null) {
+                e.preventDefault();
+                try {
+                  await invoke('seek_to_position', { position: seekTime });
+                } catch {
+                  /* handled */
+                }
+              }
+            }}
           >
             {/* Progress fill */}
             <div

@@ -14,11 +14,17 @@ export default function ColumnResizeHandle({
   return (
     <div
       className={`column-resize-handle ${isResizing ? 'active' : ''}`}
+      role="slider"
+      aria-orientation="vertical"
+      aria-label="Resize column"
+      aria-valuenow={0}
+      tabIndex={0}
       onMouseDown={(e) => {
         e.preventDefault();
         e.stopPropagation();
         onStartResize(columnId, e.clientX);
       }}
+      onKeyDown={(e) => e.stopPropagation()}
     />
   );
 }
