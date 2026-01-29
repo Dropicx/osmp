@@ -187,11 +187,13 @@ export default function Settings() {
       setDiscovery(event.payload);
     });
 
-    const unlistenProgress = listen<ScanProgress>('scan-progress', (event) => {
+    const unlistenProgress = listen<ScanProgress>('scan-progress', async (event) => {
       setProgress(event.payload);
       if (event.payload.is_complete) {
         setScanning(false);
         setDiscovery(null);
+        await useStore.getState().loadTracks(true);
+        await useStore.getState().loadAlbums(true);
       }
     });
 
@@ -239,6 +241,8 @@ export default function Settings() {
       setScanResult(result);
       setScanning(false);
       setDiscovery(null);
+      await useStore.getState().loadTracks(true);
+      await useStore.getState().loadAlbums(true);
     } catch {
       /* silently handled */
       setScanning(false);
