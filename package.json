@@ -1,6 +1,6 @@
 {
   "name": "osmp",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "description": "Open Source Music Player",
   "license": "MIT",
   "type": "module",

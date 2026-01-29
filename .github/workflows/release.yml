@@ -152,8 +152,7 @@ jobs:
           name: linux-updater
           if-no-files-found: ignore
           path: |
-            src-tauri/target/release/bundle/appimage/*.tar.gz
-            src-tauri/target/release/bundle/appimage/*.tar.gz.sig
+            src-tauri/target/release/bundle/appimage/*.AppImage.sig
 
   release:
     needs: [build-macos, build-linux]
@@ -204,10 +203,11 @@ jobs:
             fi
           done
 
-          # Find Linux signature
-          for sig_file in artifacts/linux-updater/*.tar.gz.sig; do
+          # Find Linux signature (Tauri produces .AppImage.sig, not .tar.gz)
+          for sig_file in artifacts/linux-updater/*.AppImage.sig; do
             [ -f "$sig_file" ] || continue
             LINUX_X86_64_SIG="$(cat "$sig_file")"
+            # The updater URL must point to the .AppImage file (not the .sig)
             LINUX_X86_64_NAME="$(basename "$sig_file" .sig)"
           done
 
@@ -252,6 +252,5 @@ jobs:
             artifacts/linux-appimage/*.AppImage
             artifacts/macos-updater/*.tar.gz
             artifacts/macos-updater/*.tar.gz.sig
-            artifacts/linux-updater/*.tar.gz
-            artifacts/linux-updater/*.tar.gz.sig
+            artifacts/linux-updater/*.AppImage.sig
             latest.json
