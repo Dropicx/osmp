@@ -88,10 +88,11 @@ function App() {
     };
 
     const hitTest = (x: number, y: number): Element | null => {
-      // Hide overlay so elementFromPoint sees through to real elements
-      if (overlay) overlay.style.display = 'none';
+      // Hide overlay so elementFromPoint sees through to real elements.
+      // Use visibility:hidden instead of display:none to avoid repaint flicker on Linux.
+      if (overlay) overlay.style.visibility = 'hidden';
       const el = document.elementFromPoint(x, y);
-      if (overlay) overlay.style.display = '';
+      if (overlay) overlay.style.visibility = '';
       return el;
     };
 
@@ -193,10 +194,11 @@ function App() {
 
   // Set up media control listeners, load EQ settings, and preload data on mount
   useEffect(() => {
-    setupMediaControlListeners();
+    const cleanupMediaControls = setupMediaControlListeners();
     loadEqSettings();
     loadTracks();
     loadAlbums();
+    return cleanupMediaControls;
   }, [loadEqSettings, loadTracks, loadAlbums]);
 
   // Auto-reload library when background scan finds new tracks

@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.2.3] - 2025-05-30
+
+### Fixed
+- Drag-and-drop overlay flickering on Linux (use visibility instead of display toggle)
+- Release artifacts now use generic filenames (e.g., `OSMP_amd64.AppImage`) so the updater keeps a stable filename on disk
+
 ## [0.2.2] - 2025-05-30
 
 ### Fixed

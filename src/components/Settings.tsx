@@ -19,6 +19,7 @@ import {
   RotateCcw,
   RefreshCw,
   Clock,
+  BookOpen,
 } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { COLUMN_DEFINITIONS } from '../constants';
@@ -166,6 +167,7 @@ export default function Settings() {
     periodic_scan_enabled: true,
     periodic_scan_interval_minutes: 30,
   });
+  const [expandedGuide, setExpandedGuide] = useState<Set<string>>(new Set());
   const {
     visualizerEnabled,
     setVisualizerEnabled,
@@ -176,6 +178,18 @@ export default function Settings() {
     resetColumnWidths,
     resetColumnVisibility,
   } = useStore();
+
+  const toggleGuideSection = (key: string) => {
+    setExpandedGuide((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) {
+        next.delete(key);
+      } else {
+        next.add(key);
+      }
+      return next;
+    });
+  };
 
   const loadFolders = async () => {
     try {
@@ -787,6 +801,289 @@ export default function Settings() {
               Support on Ko-fi
               <ExternalLink size={14} className="opacity-70" />
             </a>
+          </div>
+        </div>
+      </section>
+
+      {/* Guide Section */}
+      <section className="bg-bg-card rounded-2xl p-6 border border-bg-surface shadow-lg">
+        <div className="flex items-center gap-3 mb-6">
+          <BookOpen size={20} className="text-text-tertiary" />
+          <div>
+            <h2 className="text-xl font-semibold text-text-primary">Guide</h2>
+            <p className="text-sm text-text-tertiary mt-1">Learn how to use OSMP</p>
+          </div>
+        </div>
+
+        <div className="space-y-2">
+          {/* Getting Started */}
+          <div className="border border-bg-surface rounded-lg overflow-hidden">
+            <button
+              onClick={() => toggleGuideSection('getting-started')}
+              className="w-full flex items-center gap-2 p-3 bg-bg-elevated hover:bg-bg-hover text-left"
+            >
+              {expandedGuide.has('getting-started') ? (
+                <ChevronDown size={14} className="text-text-tertiary" />
+              ) : (
+                <ChevronRight size={14} className="text-text-tertiary" />
+              )}
+              <span className="text-sm font-medium text-text-secondary">Getting Started</span>
+            </button>
+            {expandedGuide.has('getting-started') && (
+              <div className="p-4 text-sm text-text-secondary space-y-2">
+                <p>
+                  <strong className="text-text-primary">1. Add folders</strong> — Open Settings and
+                  click <em>Add Folder</em> to select directories containing your music files.
+                </p>
+                <p>
+                  <strong className="text-text-primary">2. Scan</strong> — Press <em>Scan Now</em>{' '}
+                  to import metadata from your audio files. OSMP supports MP3, FLAC, WAV, OGG, M4A,
+                  and more.
+                </p>
+                <p>
+                  <strong className="text-text-primary">3. Browse</strong> — Switch between the{' '}
+                  <em>Tracks</em>, <em>Albums</em>, and <em>Playlists</em> views in the sidebar to
+                  explore your library.
+                </p>
+              </div>
+            )}
+          </div>
+
+          {/* Playback */}
+          <div className="border border-bg-surface rounded-lg overflow-hidden">
+            <button
+              onClick={() => toggleGuideSection('playback')}
+              className="w-full flex items-center gap-2 p-3 bg-bg-elevated hover:bg-bg-hover text-left"
+            >
+              {expandedGuide.has('playback') ? (
+                <ChevronDown size={14} className="text-text-tertiary" />
+              ) : (
+                <ChevronRight size={14} className="text-text-tertiary" />
+              )}
+              <span className="text-sm font-medium text-text-secondary">Playback</span>
+            </button>
+            {expandedGuide.has('playback') && (
+              <div className="p-4 text-sm text-text-secondary space-y-2">
+                <p>
+                  <strong className="text-text-primary">Play a track</strong> — Double-click any
+                  track or select it and press{' '}
+                  <kbd className="px-1.5 py-0.5 bg-bg-surface rounded text-xs font-mono border border-bg-hover">
+                    Enter
+                  </kbd>
+                  .
+                </p>
+                <p>
+                  <strong className="text-text-primary">Seek</strong> — Click or drag the progress
+                  bar to jump to any position in the track.
+                </p>
+                <p>
+                  <strong className="text-text-primary">Skip tracks</strong> — Use the{' '}
+                  <kbd className="px-1.5 py-0.5 bg-bg-surface rounded text-xs font-mono border border-bg-hover">
+                    ←
+                  </kbd>{' '}
+                  /{' '}
+                  <kbd className="px-1.5 py-0.5 bg-bg-surface rounded text-xs font-mono border border-bg-hover">
+                    →
+                  </kbd>{' '}
+                  arrow keys or the player controls to go to the previous or next track.
+                </p>
+                <p>
+                  <strong className="text-text-primary">Volume</strong> — Use the volume slider in
+                  the player bar or scroll your mouse wheel over it.
+                </p>
+                <p>
+                  <strong className="text-text-primary">Speed</strong> — Adjust playback speed from
+                  the player controls (0.5×–2×).
+                </p>
+                <p>
+                  <strong className="text-text-primary">Queue</strong> — Right-click a track and
+                  choose <em>Play Next</em> or <em>Play Later</em> to add it to the queue.
+                </p>
+              </div>
+            )}
+          </div>
+
+          {/* Playlists */}
+          <div className="border border-bg-surface rounded-lg overflow-hidden">
+            <button
+              onClick={() => toggleGuideSection('playlists')}
+              className="w-full flex items-center gap-2 p-3 bg-bg-elevated hover:bg-bg-hover text-left"
+            >
+              {expandedGuide.has('playlists') ? (
+                <ChevronDown size={14} className="text-text-tertiary" />
+              ) : (
+                <ChevronRight size={14} className="text-text-tertiary" />
+              )}
+              <span className="text-sm font-medium text-text-secondary">Playlists</span>
+            </button>
+            {expandedGuide.has('playlists') && (
+              <div className="p-4 text-sm text-text-secondary space-y-2">
+                <p>
+                  <strong className="text-text-primary">Create</strong> — Click the <em>+</em>{' '}
+                  button in the sidebar or use the playlist view to create a new playlist.
+                </p>
+                <p>
+                  <strong className="text-text-primary">Add tracks</strong> — Drag tracks from your
+                  library and drop them onto a playlist in the sidebar, or right-click a track and
+                  choose <em>Add to Playlist</em>.
+                </p>
+                <p>
+                  <strong className="text-text-primary">Reorder</strong> — Drag tracks within a
+                  playlist to rearrange them.
+                </p>
+                <p>
+                  <strong className="text-text-primary">Import / Export</strong> — Right-click a
+                  playlist to export as M3U, or use <em>Import Playlist</em> to load an M3U file.
+                </p>
+              </div>
+            )}
+          </div>
+
+          {/* Metadata */}
+          <div className="border border-bg-surface rounded-lg overflow-hidden">
+            <button
+              onClick={() => toggleGuideSection('metadata')}
+              className="w-full flex items-center gap-2 p-3 bg-bg-elevated hover:bg-bg-hover text-left"
+            >
+              {expandedGuide.has('metadata') ? (
+                <ChevronDown size={14} className="text-text-tertiary" />
+              ) : (
+                <ChevronRight size={14} className="text-text-tertiary" />
+              )}
+              <span className="text-sm font-medium text-text-secondary">Metadata</span>
+            </button>
+            {expandedGuide.has('metadata') && (
+              <div className="p-4 text-sm text-text-secondary space-y-2">
+                <p>
+                  <strong className="text-text-primary">Fetch from MusicBrainz</strong> —
+                  Right-click one or more tracks and select <em>Fetch Metadata</em> to look up
+                  artist, album, and track information automatically.
+                </p>
+                <p>
+                  <strong className="text-text-primary">Edit inline</strong> — Click on a metadata
+                  field (title, artist, album, etc.) in the track details panel to edit it directly.
+                </p>
+                <p>
+                  <strong className="text-text-primary">Write to file</strong> — After editing, save
+                  changes back to the audio file's tags so they persist outside OSMP.
+                </p>
+              </div>
+            )}
+          </div>
+
+          {/* Keyboard Shortcuts */}
+          <div className="border border-bg-surface rounded-lg overflow-hidden">
+            <button
+              onClick={() => toggleGuideSection('shortcuts')}
+              className="w-full flex items-center gap-2 p-3 bg-bg-elevated hover:bg-bg-hover text-left"
+            >
+              {expandedGuide.has('shortcuts') ? (
+                <ChevronDown size={14} className="text-text-tertiary" />
+              ) : (
+                <ChevronRight size={14} className="text-text-tertiary" />
+              )}
+              <span className="text-sm font-medium text-text-secondary">Keyboard Shortcuts</span>
+            </button>
+            {expandedGuide.has('shortcuts') && (
+              <div className="p-4">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-left text-text-tertiary border-b border-bg-surface">
+                      <th className="pb-2 font-medium">Shortcut</th>
+                      <th className="pb-2 font-medium">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody className="text-text-secondary">
+                    {[
+                      ['Space', 'Play / Pause'],
+                      ['←', 'Previous track'],
+                      ['→', 'Next track'],
+                      ['↑ / ↓', 'Volume up / down'],
+                      ['Ctrl+F', 'Focus search bar'],
+                      ['Ctrl+A', 'Select all tracks'],
+                      ['Escape', 'Clear selection / close dialog'],
+                      ['Delete', 'Remove selected tracks from playlist'],
+                      ['Enter', 'Play selected track'],
+                    ].map(([key, action]) => (
+                      <tr key={key} className="border-b border-bg-surface last:border-0">
+                        <td className="py-2 pr-4">
+                          <kbd className="px-1.5 py-0.5 bg-bg-surface rounded text-xs font-mono border border-bg-hover">
+                            {key}
+                          </kbd>
+                        </td>
+                        <td className="py-2">{action}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+          {/* Equalizer & Visualizer */}
+          <div className="border border-bg-surface rounded-lg overflow-hidden">
+            <button
+              onClick={() => toggleGuideSection('equalizer')}
+              className="w-full flex items-center gap-2 p-3 bg-bg-elevated hover:bg-bg-hover text-left"
+            >
+              {expandedGuide.has('equalizer') ? (
+                <ChevronDown size={14} className="text-text-tertiary" />
+              ) : (
+                <ChevronRight size={14} className="text-text-tertiary" />
+              )}
+              <span className="text-sm font-medium text-text-secondary">
+                Equalizer &amp; Visualizer
+              </span>
+            </button>
+            {expandedGuide.has('equalizer') && (
+              <div className="p-4 text-sm text-text-secondary space-y-2">
+                <p>
+                  <strong className="text-text-primary">Open</strong> — Click the visualizer overlay
+                  on the album art, or use the equalizer button in the player controls.
+                </p>
+                <p>
+                  <strong className="text-text-primary">Presets</strong> — Choose from built-in
+                  presets (Flat, Rock, Pop, Jazz, Classical, etc.) for quick tuning.
+                </p>
+                <p>
+                  <strong className="text-text-primary">Per-band adjustment</strong> — Drag
+                  individual frequency band sliders to fine-tune the sound to your preference.
+                </p>
+              </div>
+            )}
+          </div>
+
+          {/* Updating */}
+          <div className="border border-bg-surface rounded-lg overflow-hidden">
+            <button
+              onClick={() => toggleGuideSection('updating')}
+              className="w-full flex items-center gap-2 p-3 bg-bg-elevated hover:bg-bg-hover text-left"
+            >
+              {expandedGuide.has('updating') ? (
+                <ChevronDown size={14} className="text-text-tertiary" />
+              ) : (
+                <ChevronRight size={14} className="text-text-tertiary" />
+              )}
+              <span className="text-sm font-medium text-text-secondary">Updating the App</span>
+            </button>
+            {expandedGuide.has('updating') && (
+              <div className="p-4 text-sm text-text-secondary space-y-2">
+                <p>
+                  <strong className="text-text-primary">Check for updates</strong> — Scroll down to
+                  the <em>About</em> section on this page and click <em>Check for Updates</em>. OSMP
+                  will tell you if a newer version is available.
+                </p>
+                <p>
+                  <strong className="text-text-primary">Automatic updates</strong> — When an update
+                  is detected at launch, OSMP will automatically download and install it. The app
+                  will restart once the update is ready.
+                </p>
+                <p>
+                  <strong className="text-text-primary">Manual download</strong> — You can also
+                  download the latest release directly from the project's GitHub releases page.
+                </p>
+              </div>
+            )}
           </div>
         </div>
       </section>

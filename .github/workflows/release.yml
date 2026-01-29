@@ -168,6 +168,32 @@ jobs:
           path: artifacts
           merge-multiple: false
 
+      - name: Rename artifacts to generic filenames
+        run: |
+          # Strip version from AppImage: OSMP_0.2.0_amd64.AppImage → OSMP_amd64.AppImage
+          for f in artifacts/linux-appimage/*.AppImage; do
+            [ -f "$f" ] || continue
+            generic="$(echo "$(basename "$f")" | sed -E 's/_[0-9]+\.[0-9]+\.[0-9]+//')"
+            [ "$(basename "$f")" != "$generic" ] && mv "$f" "artifacts/linux-appimage/$generic"
+          done
+
+          # Strip version from AppImage.sig
+          for f in artifacts/linux-updater/*.AppImage.sig; do
+            [ -f "$f" ] || continue
+            generic="$(echo "$(basename "$f")" | sed -E 's/_[0-9]+\.[0-9]+\.[0-9]+//')"
+            [ "$(basename "$f")" != "$generic" ] && mv "$f" "artifacts/linux-updater/$generic"
+          done
+
+          # Strip version from DMG: OSMP_0.2.0_aarch64.dmg → OSMP_aarch64.dmg
+          for f in artifacts/macos-dmg/*.dmg; do
+            [ -f "$f" ] || continue
+            generic="$(echo "$(basename "$f")" | sed -E 's/_[0-9]+\.[0-9]+\.[0-9]+//')"
+            [ "$(basename "$f")" != "$generic" ] && mv "$f" "artifacts/macos-dmg/$generic"
+          done
+
+          echo "Renamed artifacts:"
+          find artifacts -type f | sort
+
       - name: Extract changelog for release notes
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
