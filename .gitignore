@@ -30,5 +30,8 @@ dist-ssr
 # Environment files
 .env*
 
+# Test coverage
+coverage
+
 # Tauri
 src-tauri/target
