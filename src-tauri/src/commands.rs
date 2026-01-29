@@ -12,27 +12,66 @@ use std::path::PathBuf;
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use lofty::prelude::*;
 
-/// Helper to lock the database mutex with a user-friendly error message
+/// Lock the database mutex. See `database.rs` for deadlock risk rationale.
 fn lock_db(state: &AppState) -> Result<MutexGuard<'_, DatabaseInner>, String> {
-    state.db.lock().map_err(|e| format!("Database lock error: {}", e))
+    state.db.lock().map_err(|e| {
+        tracing::error!("Database lock poisoned: {}", e);
+        "Database is temporarily unavailable".to_string()
+    })
+}
+
+/// Log the full error server-side, return a generic message to the frontend.
+fn sanitize_err<E: std::fmt::Display>(context: &str) -> impl FnOnce(E) -> String + '_ {
+    move |e: E| {
+        tracing::error!("{}: {}", context, e);
+        format!("{} failed", context)
+    }
 }
 
 #[tauri::command]
 pub async fn get_scan_folders(state: State<'_, AppState>) -> Result<Vec<ScanFolder>, String> {
     let result = lock_db(&state)?.get_scan_folders();
-    result.map_err(|e| e.to_string())
+    result.map_err(sanitize_err("Loading scan folders"))
 }
 
 #[tauri::command]
 pub async fn add_scan_folder(state: State<'_, AppState>, path: String) -> Result<(), String> {
-    let result = lock_db(&state)?.add_scan_folder(&path);
-    result.map_err(|e| e.to_string())
+    let metadata = std::fs::metadata(&path)
+        .map_err(|_| "The selected path does not exist or is not accessible".to_string())?;
+
+    if !metadata.is_dir() {
+        return Err("The selected path is not a directory".to_string());
+    }
+
+    let canonical = std::fs::canonicalize(&path)
+        .map_err(|_| "Could not resolve the directory path".to_string())?;
+    let canonical_str = canonical.to_string_lossy().to_string();
+
+    // Reject well-known system directories
+    let blocked_prefixes: &[&str] = if cfg!(target_os = "macos") {
+        &["/System", "/usr", "/bin", "/sbin", "/etc", "/var", "/private/etc", "/private/var"]
+    } else if cfg!(target_os = "linux") {
+        &["/usr", "/bin", "/sbin", "/etc", "/var", "/boot", "/proc", "/sys", "/dev", "/lib", "/lib64"]
+    } else if cfg!(target_os = "windows") {
+        &["C:\\Windows", "C:\\Program Files", "C:\\Program Files (x86)"]
+    } else {
+        &[]
+    };
+
+    for prefix in blocked_prefixes {
+        if canonical_str.starts_with(prefix) {
+            return Err(format!("Cannot add system directory '{}' as a scan folder", prefix));
+        }
+    }
+
+    let result = lock_db(&state)?.add_scan_folder(&canonical_str);
+    result.map_err(sanitize_err("Adding scan folder"))
 }
 
 #[tauri::command]
 pub async fn remove_scan_folder(state: State<'_, AppState>, id: i64) -> Result<(), String> {
     let result = lock_db(&state)?.remove_scan_folder(id);
-    result.map_err(|e| e.to_string())
+    result.map_err(sanitize_err("Removing scan folder"))
 }
 
 #[tauri::command]
@@ -49,10 +88,12 @@ pub async fn scan_folders(state: State<'_, AppState>, window: tauri::Window) -> 
     let enabled_folders: Vec<String> = {
         let folders = db.lock().map_err(|e| {
             scan_running.store(false, Ordering::SeqCst);
-            format!("Database lock error: {}", e)
+            tracing::error!("Loading folders for scan: {}", e);
+            "Loading folders for scan failed".to_string()
         })?.get_scan_folders().map_err(|e| {
             scan_running.store(false, Ordering::SeqCst);
-            e.to_string()
+            tracing::error!("Loading folders for scan: {}", e);
+            "Loading folders for scan failed".to_string()
         })?;
         folders
             .into_iter()
@@ -69,8 +110,8 @@ pub async fn scan_folders(state: State<'_, AppState>, window: tauri::Window) -> 
         result
     })
     .await
-    .map_err(|e| format!("Scan task error: {}", e))?
-    .map_err(|e| e.to_string())?;
+    .map_err(sanitize_err("Scanning folders"))?
+    .map_err(sanitize_err("Scanning folders"))?;
 
     Ok(result)
 }
@@ -84,13 +125,13 @@ pub async fn cancel_scan(state: State<'_, AppState>) -> Result<(), String> {
 #[tauri::command]
 pub async fn get_tracks(state: State<'_, AppState>, filters: Option<TrackFilters>) -> Result<Vec<Track>, String> {
     let result = lock_db(&state)?.get_tracks(filters.as_ref());
-    result.map_err(|e| e.to_string())
+    result.map_err(sanitize_err("Loading tracks"))
 }
 
 #[tauri::command]
 pub async fn search_tracks(state: State<'_, AppState>, query: String) -> Result<Vec<Track>, String> {
     let result = lock_db(&state)?.search_tracks(&query);
-    result.map_err(|e| e.to_string())
+    result.map_err(sanitize_err("Searching tracks"))
 }
 
 #[tauri::command]
@@ -117,12 +158,12 @@ pub async fn play_track(state: State<'_, AppState>, track_id: i64) -> Result<(),
     // Get track info
     let (file_path, track, release_mbid) = {
         let db = lock_db(&state)?;
-        let track = db.get_track_by_id(track_id).map_err(|e| e.to_string())?;
+        let track = db.get_track_by_id(track_id).map_err(sanitize_err("Loading track"))?;
         (track.file_path.clone(), track.clone(), track.release_mbid.clone())
     };
 
     // Play the track
-    state.audio.play_file(&file_path).map_err(|e| e.to_string())?;
+    state.audio.play_file(&file_path).map_err(sanitize_err("Playing audio"))?;
 
     // Update media controls with track metadata
     if let Some(ref media_controls) = state.media_controls {
@@ -234,13 +275,13 @@ pub async fn seek_to_position(state: State<'_, AppState>, position: f64) -> Resu
 #[tauri::command]
 pub async fn delete_track(state: State<'_, AppState>, track_id: i64) -> Result<(), String> {
     let result = lock_db(&state)?.delete_track(track_id);
-    result.map_err(|e| e.to_string())
+    result.map_err(sanitize_err("Deleting track"))
 }
 
 #[tauri::command]
 pub async fn delete_tracks(state: State<'_, AppState>, track_ids: Vec<i64>) -> Result<(), String> {
     let result = lock_db(&state)?.delete_tracks(&track_ids);
-    result.map_err(|e| e.to_string())
+    result.map_err(sanitize_err("Deleting tracks"))
 }
 
 // Helper functions for cover art caching
@@ -293,7 +334,7 @@ async fn fetch_cover_from_archive(client: &reqwest::Client, release_mbid: &str) 
 #[tauri::command]
 pub async fn get_track_cover(state: State<'_, AppState>, track_id: i64) -> Result<Option<String>, String> {
     let (file_path, release_mbid) = {
-        let track = lock_db(&state)?.get_track_by_id(track_id).map_err(|e| e.to_string())?;
+        let track = lock_db(&state)?.get_track_by_id(track_id).map_err(sanitize_err("Loading track"))?;
         (track.file_path, track.release_mbid)
     };
 
@@ -402,7 +443,7 @@ pub async fn fetch_covers(state: State<'_, AppState>, track_ids: Vec<i64>) -> Re
 #[tauri::command]
 pub async fn get_albums(state: State<'_, AppState>) -> Result<Vec<AlbumInfo>, String> {
     // Single query returns album info with first track's file_path and release_mbid
-    let album_data = lock_db(&state)?.get_albums_with_cover_info().map_err(|e| e.to_string())?;
+    let album_data = lock_db(&state)?.get_albums_with_cover_info().map_err(sanitize_err("Loading albums"))?;
 
     let albums = album_data.into_iter().map(|(album_name, artist, year, track_count, total_duration, created_at, file_path, release_mbid)| {
         // Only check local sources (embedded art + cached covers) - no network fetches
@@ -448,7 +489,7 @@ pub async fn get_album_tracks(
 ) -> Result<Vec<Track>, String> {
     let tracks = lock_db(&state)?
         .get_album_tracks(&album_name, artist.as_deref())
-        .map_err(|e| e.to_string())?;
+        .map_err(sanitize_err("Loading album tracks"))?;
     Ok(tracks)
 }
 
@@ -461,7 +502,7 @@ pub async fn get_album_cover(
     // Find first track in album (prefer one with release_mbid)
     let track_id = lock_db(&state)?
         .get_album_first_track_id(&album_name, artist.as_deref())
-        .map_err(|e| e.to_string())?;
+        .map_err(sanitize_err("Loading album cover"))?;
 
     if let Some(id) = track_id {
         // Leverage existing get_track_cover infrastructure
@@ -479,7 +520,7 @@ pub async fn play_album(
 ) -> Result<(), String> {
     let tracks = lock_db(&state)?
         .get_album_tracks(&album_name, artist.as_deref())
-        .map_err(|e| e.to_string())?;
+        .map_err(sanitize_err("Loading album"))?;
 
     if tracks.is_empty() {
         return Err("No tracks found in album".to_string());
@@ -505,7 +546,7 @@ pub async fn update_track_metadata_manual(
 ) -> Result<(), String> {
     lock_db(&state)?
         .update_track_metadata_manual(track_id, title, artist, album, year, genre, track_number)
-        .map_err(|e| e.to_string())
+        .map_err(sanitize_err("Updating metadata"))
 }
 
 #[tauri::command]
@@ -525,13 +566,13 @@ pub async fn write_metadata_to_file(
     let file_path = {
         let track = lock_db(&state)?
             .get_track_by_id(track_id)
-            .map_err(|e| e.to_string())?;
+            .map_err(sanitize_err("Reading audio file"))?;
         track.file_path
     };
 
     // Read the file
     let mut tagged_file = lofty::read_from_path(&file_path)
-        .map_err(|e| format!("Failed to read file: {}", e))?;
+        .map_err(sanitize_err("Reading audio file"))?;
 
     // Get or create primary tag
     let has_primary = tagged_file.primary_tag().is_some();
@@ -565,7 +606,7 @@ pub async fn write_metadata_to_file(
 
     // Save to file
     tag.save_to_path(&file_path, WriteOptions::default())
-        .map_err(|e| format!("Failed to write metadata: {}", e))?;
+        .map_err(sanitize_err("Writing metadata"))?;
 
     Ok(())
 }
@@ -577,13 +618,13 @@ pub async fn create_playlist(state: State<'_, AppState>, name: String) -> Result
         return Err("Playlist name cannot be empty".to_string());
     }
     let result = lock_db(&state)?.create_playlist(&name);
-    result.map_err(|e| e.to_string())
+    result.map_err(sanitize_err("Creating playlist"))
 }
 
 #[tauri::command]
 pub async fn delete_playlist(state: State<'_, AppState>, id: i64) -> Result<(), String> {
     let result = lock_db(&state)?.delete_playlist(id);
-    result.map_err(|e| e.to_string())
+    result.map_err(sanitize_err("Deleting playlist"))
 }
 
 #[tauri::command]
@@ -592,25 +633,25 @@ pub async fn rename_playlist(state: State<'_, AppState>, id: i64, new_name: Stri
         return Err("Playlist name cannot be empty".to_string());
     }
     let result = lock_db(&state)?.rename_playlist(id, &new_name);
-    result.map_err(|e| e.to_string())
+    result.map_err(sanitize_err("Renaming playlist"))
 }
 
 #[tauri::command]
 pub async fn get_playlists(state: State<'_, AppState>) -> Result<Vec<Playlist>, String> {
     let result = lock_db(&state)?.get_playlists();
-    result.map_err(|e| e.to_string())
+    result.map_err(sanitize_err("Loading playlists"))
 }
 
 #[tauri::command]
 pub async fn get_playlist(state: State<'_, AppState>, id: i64) -> Result<Playlist, String> {
     let result = lock_db(&state)?.get_playlist(id);
-    result.map_err(|e| e.to_string())
+    result.map_err(sanitize_err("Loading playlist"))
 }
 
 #[tauri::command]
 pub async fn get_playlist_tracks(state: State<'_, AppState>, playlist_id: i64) -> Result<Vec<Track>, String> {
     let result = lock_db(&state)?.get_playlist_tracks(playlist_id);
-    result.map_err(|e| e.to_string())
+    result.map_err(sanitize_err("Loading playlist tracks"))
 }
 
 #[tauri::command]
@@ -624,7 +665,7 @@ pub async fn add_track_to_playlist(
     let mut db = lock_db(&state)?;
     db.get_playlist(playlist_id).map_err(|_| format!("Playlist {} not found", playlist_id))?;
     db.get_track_by_id(track_id).map_err(|_| format!("Track {} not found", track_id))?;
-    db.add_track_to_playlist(playlist_id, track_id, position).map_err(|e| e.to_string())
+    db.add_track_to_playlist(playlist_id, track_id, position).map_err(sanitize_err("Adding to playlist"))
 }
 
 #[tauri::command]
@@ -634,7 +675,7 @@ pub async fn add_tracks_to_playlist(
     track_ids: Vec<i64>,
 ) -> Result<(), String> {
     lock_db(&state)?.add_tracks_to_playlist_batch(playlist_id, &track_ids)
-        .map_err(|e| e.to_string())
+        .map_err(sanitize_err("Adding to playlist"))
 }
 
 #[tauri::command]
@@ -644,7 +685,7 @@ pub async fn remove_track_from_playlist(
     track_id: i64,
 ) -> Result<(), String> {
     let result = lock_db(&state)?.remove_track_from_playlist(playlist_id, track_id);
-    result.map_err(|e| e.to_string())
+    result.map_err(sanitize_err("Removing from playlist"))
 }
 
 #[tauri::command]
@@ -654,7 +695,7 @@ pub async fn reorder_playlist_tracks(
     track_positions: Vec<(i64, i64)>,
 ) -> Result<(), String> {
     let result = lock_db(&state)?.reorder_playlist_tracks(playlist_id, track_positions);
-    result.map_err(|e| e.to_string())
+    result.map_err(sanitize_err("Reordering playlist"))
 }
 
 #[tauri::command]
@@ -667,14 +708,14 @@ pub async fn duplicate_playlist(
         return Err("Playlist name cannot be empty".to_string());
     }
     let result = lock_db(&state)?.duplicate_playlist(playlist_id, &new_name);
-    result.map_err(|e| e.to_string())
+    result.map_err(sanitize_err("Duplicating playlist"))
 }
 
 #[tauri::command]
 pub async fn play_playlist(state: State<'_, AppState>, playlist_id: i64) -> Result<(), String> {
     let tracks = lock_db(&state)?
         .get_playlist_tracks(playlist_id)
-        .map_err(|e| e.to_string())?;
+        .map_err(sanitize_err("Loading playlist"))?;
 
     if tracks.is_empty() {
         return Err("Playlist is empty".to_string());
@@ -737,7 +778,7 @@ pub async fn save_eq_settings(state: State<'_, AppState>) -> Result<(), String> 
     let settings = state.audio.get_eq_settings();
     lock_db(&state)?
         .save_eq_settings(&settings)
-        .map_err(|e| e.to_string())
+        .map_err(sanitize_err("Saving equalizer"))
 }
 
 #[tauri::command]
@@ -760,7 +801,7 @@ pub async fn set_playback_speed(state: State<'_, AppState>, speed: f32) -> Resul
 pub async fn preload_next_track(state: State<'_, AppState>, track_id: i64) -> Result<(), String> {
     let file_path = {
         let db = lock_db(&state)?;
-        let track = db.get_track_by_id(track_id).map_err(|e| e.to_string())?;
+        let track = db.get_track_by_id(track_id).map_err(sanitize_err("Loading track"))?;
         track.file_path
     };
     state.audio.preload_next(&file_path);
@@ -776,7 +817,7 @@ pub async fn record_play_history(
 ) -> Result<(), String> {
     lock_db(&state)?
         .record_play_history(track_id, duration_listened)
-        .map_err(|e| e.to_string())
+        .map_err(sanitize_err("Recording history"))
 }
 
 #[tauri::command]
@@ -786,7 +827,7 @@ pub async fn get_play_history(
 ) -> Result<Vec<crate::models::PlayHistoryEntry>, String> {
     lock_db(&state)?
         .get_play_history(limit.unwrap_or(50))
-        .map_err(|e| e.to_string())
+        .map_err(sanitize_err("Loading history"))
 }
 
 // Duplicate detection
@@ -794,7 +835,7 @@ pub async fn get_play_history(
 pub async fn get_duplicates(state: State<'_, AppState>) -> Result<Vec<Vec<Track>>, String> {
     lock_db(&state)?
         .get_duplicate_tracks()
-        .map_err(|e| e.to_string())
+        .map_err(sanitize_err("Finding duplicates"))
 }
 
 // M3U Playlist Import/Export
@@ -806,12 +847,12 @@ pub async fn export_playlist_m3u(
 ) -> Result<(), String> {
     let tracks = lock_db(&state)?
         .get_playlist_tracks(playlist_id)
-        .map_err(|e| e.to_string())?;
+        .map_err(sanitize_err("Exporting playlist"))?;
     let playlist = lock_db(&state)?
         .get_playlist(playlist_id)
-        .map_err(|e| e.to_string())?;
+        .map_err(sanitize_err("Exporting playlist"))?;
     crate::playlist_io::export_m3u(&playlist.name, &tracks, &output_path)
-        .map_err(|e| e.to_string())
+        .map_err(sanitize_err("Exporting playlist"))
 }
 
 #[tauri::command]
@@ -821,7 +862,7 @@ pub async fn import_playlist_m3u(
     playlist_name: Option<String>,
 ) -> Result<i64, String> {
     let entries = crate::playlist_io::parse_m3u(&file_path)
-        .map_err(|e| e.to_string())?;
+        .map_err(sanitize_err("Importing playlist"))?;
 
     let name = playlist_name.unwrap_or_else(|| {
         std::path::Path::new(&file_path)
@@ -832,7 +873,7 @@ pub async fn import_playlist_m3u(
     });
 
     let mut db = lock_db(&state)?;
-    let playlist_id = db.create_playlist(&name).map_err(|e| e.to_string())?;
+    let playlist_id = db.create_playlist(&name).map_err(sanitize_err("Importing playlist"))?;
 
     // Match entries to existing tracks by file path
     for entry in &entries {
@@ -852,15 +893,15 @@ pub async fn import_playlist_m3u(
 pub async fn get_scan_settings(state: State<'_, AppState>) -> Result<ScanSettings, String> {
     let db = lock_db(&state)?;
     let scan_on_startup = db.get_setting("scan_on_startup")
-        .map_err(|e| e.to_string())?
+        .map_err(sanitize_err("Loading scan settings"))?
         .map(|v| v == "true")
         .unwrap_or(true);
     let periodic_scan_enabled = db.get_setting("periodic_scan_enabled")
-        .map_err(|e| e.to_string())?
+        .map_err(sanitize_err("Loading scan settings"))?
         .map(|v| v == "true")
         .unwrap_or(true);
     let periodic_scan_interval_minutes = db.get_setting("periodic_scan_interval_minutes")
-        .map_err(|e| e.to_string())?
+        .map_err(sanitize_err("Loading scan settings"))?
         .and_then(|v| v.parse::<u64>().ok())
         .unwrap_or(30);
 
@@ -875,10 +916,10 @@ pub async fn get_scan_settings(state: State<'_, AppState>) -> Result<ScanSetting
 pub async fn set_scan_settings(state: State<'_, AppState>, settings: ScanSettings) -> Result<(), String> {
     let mut db = lock_db(&state)?;
     db.set_setting("scan_on_startup", &settings.scan_on_startup.to_string())
-        .map_err(|e| e.to_string())?;
+        .map_err(sanitize_err("Saving scan settings"))?;
     db.set_setting("periodic_scan_enabled", &settings.periodic_scan_enabled.to_string())
-        .map_err(|e| e.to_string())?;
+        .map_err(sanitize_err("Saving scan settings"))?;
     db.set_setting("periodic_scan_interval_minutes", &settings.periodic_scan_interval_minutes.to_string())
-        .map_err(|e| e.to_string())?;
+        .map_err(sanitize_err("Saving scan settings"))?;
     Ok(())
 }

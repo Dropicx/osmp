@@ -243,7 +243,9 @@ impl ScannerWithProgress {
                 // Check if file was modified since last scan
                 let file_modified = fs::metadata(path)
                     .and_then(|m| m.modified())
-                    .map(|t| t.duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64)
+                    .map(|t| t.duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or(std::time::Duration::ZERO)
+                        .as_secs() as i64)
                     .unwrap_or(0);
                 file_modified > db_modified
             }
@@ -258,7 +260,7 @@ impl ScannerWithProgress {
         let last_modified = metadata
             .modified()?
             .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
+            .unwrap_or(std::time::Duration::ZERO)
             .as_secs() as i64;
 
         let extension = path

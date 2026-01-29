@@ -10,6 +10,13 @@ pub type AlbumInfo = (String, Option<String>, Option<i64>, i64, Option<i64>, i64
 /// (album, artist, year, track_count, total_duration, most_recent_created_at, file_path, release_mbid)
 pub type AlbumCoverInfo = (String, Option<String>, Option<i64>, i64, Option<i64>, i64, Option<String>, Option<String>);
 
+/// Thread-safe handle to the database.
+///
+/// Uses `std::sync::Mutex` which blocks indefinitely on `lock()`.
+/// Deadlock risk is accepted as low because:
+/// 1. All lock acquisitions are short-lived (single DB operation then drop).
+/// 2. No code path holds the lock while acquiring another lock.
+/// 3. The `lock_db()` helper in commands.rs handles the poisoned case.
 pub type Database = Arc<Mutex<DatabaseInner>>;
 
 pub struct DatabaseInner {
@@ -1238,7 +1245,6 @@ impl DatabaseInner {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::PathBuf;
     use tempfile::TempDir;
 
     fn create_test_db() -> Result<DatabaseInner> {

@@ -224,8 +224,15 @@ Contributions are welcome. Please feel free to submit a Pull Request.
 
 This project is licensed under the [MIT License](LICENSE).
 
+## Support
+
+If you enjoy using OSMP, consider supporting the development:
+
+[![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/la7)
+
 ## Acknowledgments
 
+- Built with the assistance of [Claude Code](https://claude.ai/claude-code) by Anthropic
 - [Tauri](https://tauri.app/) for the app framework
 - [MusicBrainz](https://musicbrainz.org/) and [Cover Art Archive](https://coverartarchive.org/) for metadata and artwork
 - [Lucide](https://lucide.dev/) for icons

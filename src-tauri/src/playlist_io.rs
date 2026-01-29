@@ -55,11 +55,28 @@ pub fn parse_m3u(file_path: &str) -> io::Result<Vec<M3uEntry>> {
         }
 
         // This is a file path
-        let resolved_path = if Path::new(line).is_absolute() {
+        let raw_path = if Path::new(line).is_absolute() {
             line.to_string()
         } else {
             base_dir.join(line).to_string_lossy().to_string()
         };
+
+        // Canonicalize to resolve symlinks and ".." components
+        let resolved_path = match std::fs::canonicalize(&raw_path) {
+            Ok(canonical) => canonical.to_string_lossy().to_string(),
+            Err(_) => continue, // Skip paths that don't exist on disk
+        };
+
+        // Validate the file has an audio extension
+        let valid_extensions = ["mp3", "flac", "ogg", "m4a", "wav", "aac", "opus", "wma"];
+        let has_audio_ext = Path::new(&resolved_path)
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(|e| valid_extensions.contains(&e.to_lowercase().as_str()))
+            .unwrap_or(false);
+        if !has_audio_ext {
+            continue;
+        }
 
         entries.push(M3uEntry {
             path: resolved_path,

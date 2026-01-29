@@ -92,7 +92,7 @@ pub fn run() {
     let http_client = match reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(15))
         .pool_max_idle_per_host(2)
-        .user_agent("OSMP/0.1.0 (https://github.com/Dropicx/osmp)")
+        .user_agent(format!("OSMP/{} (https://github.com/Dropicx/osmp)", env!("CARGO_PKG_VERSION")))
         .build()
     {
         Ok(client) => client,

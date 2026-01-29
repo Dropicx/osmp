@@ -243,7 +243,7 @@ impl MetadataFetcher {
                     .unwrap_or(0);
 
                 // Only accept results with reasonable confidence
-                if score < 70 {
+                if score < 80 {
                     continue;
                 }
 

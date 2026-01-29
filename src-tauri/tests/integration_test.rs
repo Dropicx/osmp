@@ -1,6 +1,5 @@
 use osmp_lib::database::DatabaseInner;
 use osmp_lib::models::Track;
-use std::path::PathBuf;
 
 fn create_test_db() -> Result<DatabaseInner, Box<dyn std::error::Error>> {
     let temp_dir = tempfile::TempDir::new()?;
