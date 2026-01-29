@@ -36,7 +36,7 @@ pub struct AlbumInfo {
     pub year: Option<i64>,
     pub track_count: i64,
     pub total_duration: Option<i64>,
-    pub created_at: i64, // most recent track's created_at
+    pub created_at: i64,           // most recent track's created_at
     pub cover_art: Option<String>, // base64 data URI
 }
 

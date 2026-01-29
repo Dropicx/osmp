@@ -3,26 +3,39 @@ use crate::models::MetadataResult;
 use anyhow::{Context, Result};
 use regex::Regex;
 use serde_json::Value;
+use std::path::Path;
 use std::sync::LazyLock;
 use std::time::Duration;
-use std::path::Path;
-
 
 // Pre-compiled regex patterns (compiled once, reused forever)
 static RE_QUOTE_SINGLE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"'([^']+)'").unwrap());
 static RE_QUOTE_DOUBLE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#""([^"]+)""#).unwrap());
-static RE_TIMESTAMP_PAREN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\(\d{4}[_-]\d{2}[_-]\d{2}[^)]*\)").unwrap());
-static RE_TIMESTAMP_BRACKET: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\[\d{4}[_-]\d{2}[_-]\d{2}[^\]]*\]").unwrap());
-static RE_TRACK_NUMBER: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\d{1,3}[\s._-]+").unwrap());
-static RE_NUMBERED_PARENS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"[\(\[]\d+[\)\]]").unwrap());
-static RE_QUALITY_BITRATE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)\(?\b(?:320|256|192|128)\s*(?:kbps|kbs)?\)?").unwrap());
-static RE_QUALITY_FORMAT: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)\(?\b(?:mp3|flac|wav|aac|m4a|HQ|LQ|HD)\)?").unwrap());
-static RE_SUFFIX_DASH: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)\s*[-_]\s*(?:official|video|audio|lyrics?|hd|hq)\s*$").unwrap());
-static RE_SUFFIX_PAREN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)\s*\((?:official|video|audio|lyrics?|hd|hq)[^)]*\)\s*$").unwrap());
-static RE_LONG_PAREN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\s*\([^)]{15,}\)\s*$").unwrap());
-static RE_LONG_BRACKET: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\s*\[[^\]]{15,}\]\s*$").unwrap());
-static RE_CLEAN_TRACK_NUM: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\d{1,3}[\s._-]+").unwrap());
-static RE_CLEAN_PAREN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\s*\([^)]{10,}\)\s*$").unwrap());
+static RE_TIMESTAMP_PAREN: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\(\d{4}[_-]\d{2}[_-]\d{2}[^)]*\)").unwrap());
+static RE_TIMESTAMP_BRACKET: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\[\d{4}[_-]\d{2}[_-]\d{2}[^\]]*\]").unwrap());
+static RE_TRACK_NUMBER: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^\d{1,3}[\s._-]+").unwrap());
+static RE_NUMBERED_PARENS: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"[\(\[]\d+[\)\]]").unwrap());
+static RE_QUALITY_BITRATE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)\(?\b(?:320|256|192|128)\s*(?:kbps|kbs)?\)?").unwrap());
+static RE_QUALITY_FORMAT: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)\(?\b(?:mp3|flac|wav|aac|m4a|HQ|LQ|HD)\)?").unwrap());
+static RE_SUFFIX_DASH: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)\s*[-_]\s*(?:official|video|audio|lyrics?|hd|hq)\s*$").unwrap()
+});
+static RE_SUFFIX_PAREN: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)\s*\((?:official|video|audio|lyrics?|hd|hq)[^)]*\)\s*$").unwrap()
+});
+static RE_LONG_PAREN: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\s*\([^)]{15,}\)\s*$").unwrap());
+static RE_LONG_BRACKET: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\s*\[[^\]]{15,}\]\s*$").unwrap());
+static RE_CLEAN_TRACK_NUM: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^\d{1,3}[\s._-]+").unwrap());
+static RE_CLEAN_PAREN: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\s*\([^)]{10,}\)\s*$").unwrap());
 
 pub struct MetadataFetcher {
     db: Database,
@@ -42,10 +55,11 @@ impl MetadataFetcher {
 
     pub async fn fetch_metadata_for_track(&self, track_id: i64) -> Result<MetadataResult> {
         let (existing_artist, existing_title, file_path) = {
-            let db = self.db.lock()
+            let db = self
+                .db
+                .lock()
                 .map_err(|e| anyhow::anyhow!("Database lock poisoned: {}", e))?;
-            let track = db.get_track_by_id(track_id)
-                .context("Track not found")?;
+            let track = db.get_track_by_id(track_id).context("Track not found")?;
 
             // Skip if already fetched and has good metadata
             if track.metadata_fetched && track.title.is_some() && track.artist.is_some() {
@@ -56,7 +70,11 @@ impl MetadataFetcher {
                 });
             }
 
-            (track.artist.clone(), track.title.clone(), track.file_path.clone())
+            (
+                track.artist.clone(),
+                track.title.clone(),
+                track.file_path.clone(),
+            )
         };
 
         // Parse and clean the filename
@@ -93,7 +111,10 @@ impl MetadataFetcher {
                 continue; // Skip too short titles
             }
 
-            if let Ok(result) = self.fetch_from_musicbrainz(artist.as_ref(), &title, track_id).await {
+            if let Ok(result) = self
+                .fetch_from_musicbrainz(artist.as_ref(), &title, track_id)
+                .await
+            {
                 if result.success {
                     return Ok(result);
                 }
@@ -112,7 +133,8 @@ impl MetadataFetcher {
 
     fn parse_and_clean_filename(&self, file_path: &str) -> ParsedFilename {
         let path = Path::new(file_path);
-        let filename = path.file_stem()
+        let filename = path
+            .file_stem()
             .and_then(|s| s.to_str())
             .unwrap_or("")
             .to_string();
@@ -136,12 +158,22 @@ impl MetadataFetcher {
         }
 
         // 2. Remove common garbage patterns using pre-compiled regexes
-        cleaned_title = RE_TIMESTAMP_PAREN.replace_all(&cleaned_title, " ").to_string();
-        cleaned_title = RE_TIMESTAMP_BRACKET.replace_all(&cleaned_title, " ").to_string();
+        cleaned_title = RE_TIMESTAMP_PAREN
+            .replace_all(&cleaned_title, " ")
+            .to_string();
+        cleaned_title = RE_TIMESTAMP_BRACKET
+            .replace_all(&cleaned_title, " ")
+            .to_string();
         cleaned_title = RE_TRACK_NUMBER.replace(&cleaned_title, "").to_string();
-        cleaned_title = RE_NUMBERED_PARENS.replace_all(&cleaned_title, " ").to_string();
-        cleaned_title = RE_QUALITY_BITRATE.replace_all(&cleaned_title, " ").to_string();
-        cleaned_title = RE_QUALITY_FORMAT.replace_all(&cleaned_title, " ").to_string();
+        cleaned_title = RE_NUMBERED_PARENS
+            .replace_all(&cleaned_title, " ")
+            .to_string();
+        cleaned_title = RE_QUALITY_BITRATE
+            .replace_all(&cleaned_title, " ")
+            .to_string();
+        cleaned_title = RE_QUALITY_FORMAT
+            .replace_all(&cleaned_title, " ")
+            .to_string();
         cleaned_title = RE_SUFFIX_DASH.replace(&cleaned_title, "").to_string();
         cleaned_title = RE_SUFFIX_PAREN.replace(&cleaned_title, "").to_string();
         cleaned_title = RE_LONG_PAREN.replace(&cleaned_title, "").to_string();
@@ -149,12 +181,12 @@ impl MetadataFetcher {
 
         // 3. Try to extract artist from common patterns
         let artist_patterns = [
-            (" - ", false),      // "Artist - Title"
-            (" – ", false),      // "Artist – Title" (en-dash)
-            (" — ", false),      // "Artist — Title" (em-dash)
-            (" by ", true),      // "Title by Artist"
-            (" ft. ", true),     // "Title ft. Artist"
-            (" feat. ", true),   // "Title feat. Artist"
+            (" - ", false),    // "Artist - Title"
+            (" – ", false),    // "Artist – Title" (en-dash)
+            (" — ", false),    // "Artist — Title" (em-dash)
+            (" by ", true),    // "Title by Artist"
+            (" ft. ", true),   // "Title ft. Artist"
+            (" feat. ", true), // "Title feat. Artist"
             (" featuring ", true),
         ];
 
@@ -188,10 +220,7 @@ impl MetadataFetcher {
             .join(" ");
 
         // 5. Remove quotes from cleaned title
-        cleaned_title = cleaned_title
-            .replace(['\'', '"'], "")
-            .trim()
-            .to_string();
+        cleaned_title = cleaned_title.replace(['\'', '"'], "").trim().to_string();
 
         ParsedFilename {
             cleaned_title,
@@ -208,6 +237,38 @@ impl MetadataFetcher {
         result.trim().to_string()
     }
 
+    /// Escape special characters for MusicBrainz Lucene query syntax.
+    fn escape_lucene(s: &str) -> String {
+        let mut out = String::with_capacity(s.len());
+        for c in s.chars() {
+            if matches!(
+                c,
+                '+' | '-'
+                    | '&'
+                    | '|'
+                    | '!'
+                    | '('
+                    | ')'
+                    | '{'
+                    | '}'
+                    | '['
+                    | ']'
+                    | '^'
+                    | '"'
+                    | '~'
+                    | '*'
+                    | '?'
+                    | ':'
+                    | '\\'
+                    | '/'
+            ) {
+                out.push('\\');
+            }
+            out.push(c);
+        }
+        out
+    }
+
     async fn fetch_from_musicbrainz(
         &self,
         artist: Option<&String>,
@@ -216,9 +277,13 @@ impl MetadataFetcher {
     ) -> Result<MetadataResult> {
         // Build query based on available info
         let query = if let Some(artist) = artist {
-            format!("artist:\"{}\" AND recording:\"{}\"", artist, title)
+            format!(
+                "artist:\"{}\" AND recording:\"{}\"",
+                Self::escape_lucene(artist),
+                Self::escape_lucene(title)
+            )
         } else {
-            format!("recording:\"{}\"", title)
+            format!("recording:\"{}\"", Self::escape_lucene(title))
         };
 
         let url = format!(
@@ -226,21 +291,24 @@ impl MetadataFetcher {
             urlencoding::encode(&query)
         );
 
-        let response = self.client
+        let response = self
+            .client
             .get(&url)
             .send()
             .await
             .context("Failed to fetch from MusicBrainz")?;
+
+        // Guard against oversized responses (5 MB limit for JSON metadata)
+        if response.content_length().unwrap_or(0) > 5 * 1024 * 1024 {
+            return Err(anyhow::anyhow!("MusicBrainz response too large"));
+        }
 
         let json: Value = response.json().await?;
 
         if let Some(recordings) = json.get("recordings").and_then(|r| r.as_array()) {
             // Find best match - prefer one with high score
             for recording in recordings {
-                let score = recording
-                    .get("score")
-                    .and_then(|s| s.as_i64())
-                    .unwrap_or(0);
+                let score = recording.get("score").and_then(|s| s.as_i64()).unwrap_or(0);
 
                 // Only accept results with reasonable confidence
                 if score < 80 {
@@ -285,7 +353,9 @@ impl MetadataFetcher {
 
                 // Only update if we got useful data
                 if fetched_artist.is_some() || fetched_title.is_some() {
-                    let mut db = self.db.lock()
+                    let mut db = self
+                        .db
+                        .lock()
                         .map_err(|e| anyhow::anyhow!("Database lock poisoned: {}", e))?;
                     db.update_track_metadata_smart(
                         track_id,

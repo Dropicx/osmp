@@ -27,6 +27,8 @@ dist-ssr
 # Database files
 *.db
 
+# Environment files
+.env*
+
 # Tauri
 src-tauri/target
-src-tauri/Cargo.lock

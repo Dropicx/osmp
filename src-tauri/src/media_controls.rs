@@ -19,7 +19,7 @@ pub struct MediaMetadata {
     pub artist: String,
     pub album: String,
     pub artwork: Option<Vec<u8>>, // Raw image data
-    pub duration: f64, // Duration in seconds
+    pub duration: f64,            // Duration in seconds
 }
 
 // Playback state
@@ -35,7 +35,8 @@ pub trait MediaControlsPlatform: Send + Sync {
     fn update_metadata(&self, metadata: &MediaMetadata) -> Result<(), String>;
     fn update_playback_state(&self, state: PlaybackState) -> Result<(), String>;
     fn update_position(&self, position: f64) -> Result<(), String>;
-    fn set_available_actions(&self, can_go_next: bool, can_go_previous: bool) -> Result<(), String>;
+    fn set_available_actions(&self, can_go_next: bool, can_go_previous: bool)
+        -> Result<(), String>;
 }
 
 // Main media controls manager
@@ -50,17 +51,20 @@ impl MediaControlsManager {
 
         #[cfg(target_os = "linux")]
         let platform: Box<dyn MediaControlsPlatform> = Box::new(
-            crate::media_controls_mpris::MprisControls::new(sender.clone()).map_err(|e| format!("Failed to initialize MPRIS: {}", e))?
+            crate::media_controls_mpris::MprisControls::new(sender.clone())
+                .map_err(|e| format!("Failed to initialize MPRIS: {}", e))?,
         );
 
         #[cfg(target_os = "macos")]
         let platform: Box<dyn MediaControlsPlatform> = Box::new(
-            crate::media_controls_macos::MacOSControls::new(sender.clone()).map_err(|e| format!("Failed to initialize macOS controls: {}", e))?
+            crate::media_controls_macos::MacOSControls::new(sender.clone())
+                .map_err(|e| format!("Failed to initialize macOS controls: {}", e))?,
         );
 
         #[cfg(target_os = "windows")]
         let platform: Box<dyn MediaControlsPlatform> = Box::new(
-            crate::media_controls_windows::WindowsControls::new(sender.clone()).map_err(|e| format!("Failed to initialize Windows controls: {}", e))?
+            crate::media_controls_windows::WindowsControls::new(sender.clone())
+                .map_err(|e| format!("Failed to initialize Windows controls: {}", e))?,
         );
 
         #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
@@ -89,8 +93,13 @@ impl MediaControlsManager {
         self.platform.update_position(position)
     }
 
-    pub fn set_available_actions(&self, can_go_next: bool, can_go_previous: bool) -> Result<(), String> {
-        self.platform.set_available_actions(can_go_next, can_go_previous)
+    pub fn set_available_actions(
+        &self,
+        can_go_next: bool,
+        can_go_previous: bool,
+    ) -> Result<(), String> {
+        self.platform
+            .set_available_actions(can_go_next, can_go_previous)
     }
 
     pub fn get_event_sender(&self) -> mpsc::UnboundedSender<MediaControlEvent> {
@@ -116,7 +125,11 @@ impl MediaControlsPlatform for DummyPlatform {
         Ok(())
     }
 
-    fn set_available_actions(&self, _can_go_next: bool, _can_go_previous: bool) -> Result<(), String> {
+    fn set_available_actions(
+        &self,
+        _can_go_next: bool,
+        _can_go_previous: bool,
+    ) -> Result<(), String> {
         Ok(())
     }
 }

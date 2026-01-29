@@ -1,6 +1,6 @@
-use crate::models::{Track, M3uEntry};
+use crate::models::{M3uEntry, Track};
 use std::fs;
-use std::io::{self, Write, BufRead, BufReader};
+use std::io::{self, BufRead, BufReader, Write};
 use std::path::Path;
 
 /// Export a playlist to M3U format

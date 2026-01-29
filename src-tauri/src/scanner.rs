@@ -1,17 +1,17 @@
 use crate::database::Database;
-use crate::models::{Track, ScanProgress, ScanResult, ScanError, ScanDiscovery};
+use crate::models::{ScanDiscovery, ScanError, ScanProgress, ScanResult, Track};
+use anyhow::Result;
 use lofty::prelude::{Accessor, AudioFile, TaggedFileExt};
 use lofty::read_from_path;
 use std::collections::HashMap;
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
-use walkdir::WalkDir;
-use anyhow::Result;
-use std::fs;
 use tauri::Emitter;
-use tracing::{warn, error};
+use tracing::{error, warn};
+use walkdir::WalkDir;
 
 const BATCH_SIZE: usize = 100;
 const AUDIO_EXTENSIONS: [&str; 8] = ["mp3", "flac", "ogg", "m4a", "wav", "aac", "opus", "wma"];
@@ -26,11 +26,25 @@ pub struct ScannerWithProgress {
 
 impl ScannerWithProgress {
     pub fn new(db: Database, app_handle: tauri::AppHandle, cancelled: Arc<AtomicBool>) -> Self {
-        ScannerWithProgress { db, app_handle, cancelled, quiet: false }
+        ScannerWithProgress {
+            db,
+            app_handle,
+            cancelled,
+            quiet: false,
+        }
     }
 
-    pub fn new_quiet(db: Database, app_handle: tauri::AppHandle, cancelled: Arc<AtomicBool>) -> Self {
-        ScannerWithProgress { db, app_handle, cancelled, quiet: true }
+    pub fn new_quiet(
+        db: Database,
+        app_handle: tauri::AppHandle,
+        cancelled: Arc<AtomicBool>,
+    ) -> Self {
+        ScannerWithProgress {
+            db,
+            app_handle,
+            cancelled,
+            quiet: true,
+        }
     }
 
     /// Main scan entry point with all optimizations
@@ -45,7 +59,9 @@ impl ScannerWithProgress {
         let total_files = files.len();
 
         // 2. Get existing files for incremental scanning
-        let existing_files = self.db.lock()
+        let existing_files = self
+            .db
+            .lock()
             .map_err(|e| anyhow::anyhow!("Database lock poisoned: {}", e))?
             .get_existing_file_info()
             .unwrap_or_default();
@@ -185,14 +201,21 @@ impl ScannerWithProgress {
 
             // Emit discovery start for this folder
             if !self.quiet {
-                let _ = self.app_handle.emit("scan-discovery", ScanDiscovery {
-                    files_found: files.len(),
-                    current_folder: folder_path.clone(),
-                    is_complete: false,
-                });
+                let _ = self.app_handle.emit(
+                    "scan-discovery",
+                    ScanDiscovery {
+                        files_found: files.len(),
+                        current_folder: folder_path.clone(),
+                        is_complete: false,
+                    },
+                );
             }
 
-            for entry in WalkDir::new(folder_path).into_iter().filter_map(|e| e.ok()) {
+            for entry in WalkDir::new(folder_path)
+                .follow_links(false)
+                .into_iter()
+                .filter_map(|e| e.ok())
+            {
                 // Check for cancellation during discovery
                 if self.cancelled.load(Ordering::SeqCst) {
                     return files;
@@ -208,11 +231,14 @@ impl ScannerWithProgress {
 
                             // Emit progress every 100ms to avoid flooding
                             if !self.quiet && last_emit.elapsed().as_millis() > 100 {
-                                let _ = self.app_handle.emit("scan-discovery", ScanDiscovery {
-                                    files_found: files.len(),
-                                    current_folder: folder_path.clone(),
-                                    is_complete: false,
-                                });
+                                let _ = self.app_handle.emit(
+                                    "scan-discovery",
+                                    ScanDiscovery {
+                                        files_found: files.len(),
+                                        current_folder: folder_path.clone(),
+                                        is_complete: false,
+                                    },
+                                );
                                 last_emit = Instant::now();
                             }
                         }
@@ -223,11 +249,14 @@ impl ScannerWithProgress {
 
         // Emit discovery complete
         if !self.quiet {
-            let _ = self.app_handle.emit("scan-discovery", ScanDiscovery {
-                files_found: files.len(),
-                current_folder: String::new(),
-                is_complete: true,
-            });
+            let _ = self.app_handle.emit(
+                "scan-discovery",
+                ScanDiscovery {
+                    files_found: files.len(),
+                    current_folder: String::new(),
+                    is_complete: true,
+                },
+            );
         }
 
         files
@@ -238,14 +267,16 @@ impl ScannerWithProgress {
         let path_str = path.to_string_lossy().to_string();
 
         match existing.get(&path_str) {
-            None => true,  // New file - needs scanning
+            None => true, // New file - needs scanning
             Some(&db_modified) => {
                 // Check if file was modified since last scan
                 let file_modified = fs::metadata(path)
                     .and_then(|m| m.modified())
-                    .map(|t| t.duration_since(std::time::UNIX_EPOCH)
-                        .unwrap_or(std::time::Duration::ZERO)
-                        .as_secs() as i64)
+                    .map(|t| {
+                        t.duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or(std::time::Duration::ZERO)
+                            .as_secs() as i64
+                    })
                     .unwrap_or(0);
                 file_modified > db_modified
             }
@@ -301,12 +332,17 @@ impl ScannerWithProgress {
 
                 // Skip files shorter than 30 seconds (likely sound effects)
                 if duration_secs < 30 {
-                    return Err(anyhow::anyhow!("File too short (< 30s), likely a sound effect"));
+                    return Err(anyhow::anyhow!(
+                        "File too short (< 30s), likely a sound effect"
+                    ));
                 }
 
                 duration = Some(duration_secs);
 
-                if let Some(tag) = tagged_file.primary_tag().or_else(|| tagged_file.first_tag()) {
+                if let Some(tag) = tagged_file
+                    .primary_tag()
+                    .or_else(|| tagged_file.first_tag())
+                {
                     title = tag.title().map(|s| s.to_string());
                     artist = tag.artist().map(|s| s.to_string());
                     album = tag.album().map(|s| s.to_string());
@@ -319,17 +355,20 @@ impl ScannerWithProgress {
                 // Lofty failed to read the file - estimate duration from file size
                 // Typical bitrates: MP3 ~128-320kbps, FLAC ~800-1400kbps
                 let estimated_bitrate = match extension.as_str() {
-                    "mp3" => 192_000,  // 192 kbps average
+                    "mp3" => 192_000, // 192 kbps average
                     "m4a" | "aac" => 192_000,
                     "ogg" | "opus" => 160_000,
-                    "flac" => 900_000, // ~900 kbps average
+                    "flac" => 900_000,  // ~900 kbps average
                     "wav" => 1_411_000, // CD quality
                     "wma" => 192_000,
                     _ => 192_000,
                 };
 
                 // Duration = (file_size_bits) / bitrate
-                let estimated_duration = (file_size * 8) / estimated_bitrate;
+                let estimated_duration = file_size
+                    .checked_mul(8)
+                    .and_then(|bits| bits.checked_div(estimated_bitrate))
+                    .unwrap_or(0);
 
                 // Only use estimate if it seems reasonable (> 30 seconds)
                 if estimated_duration >= 30 {

@@ -1,8 +1,8 @@
 use rodio::source::SeekError;
 use rodio::Source;
 use serde::{Deserialize, Serialize};
-use std::sync::{Arc, RwLock};
 use std::sync::atomic::{AtomicU32, Ordering as AtomicOrdering};
+use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
 /// Number of analysis bands for the visualizer
@@ -15,8 +15,16 @@ const VIS_FREQUENCIES: [f32; VIS_BAND_COUNT] = [
 
 /// Shared visualizer band levels (stored as f32 bits in AtomicU32 for lock-free access)
 static VIS_LEVELS: [AtomicU32; VIS_BAND_COUNT] = [
-    AtomicU32::new(0), AtomicU32::new(0), AtomicU32::new(0), AtomicU32::new(0), AtomicU32::new(0),
-    AtomicU32::new(0), AtomicU32::new(0), AtomicU32::new(0), AtomicU32::new(0), AtomicU32::new(0),
+    AtomicU32::new(0),
+    AtomicU32::new(0),
+    AtomicU32::new(0),
+    AtomicU32::new(0),
+    AtomicU32::new(0),
+    AtomicU32::new(0),
+    AtomicU32::new(0),
+    AtomicU32::new(0),
+    AtomicU32::new(0),
+    AtomicU32::new(0),
 ];
 
 /// Read the current visualizer levels (called from the main/Tauri thread)
@@ -115,14 +123,46 @@ pub struct EqPreset {
 
 pub fn get_presets() -> Vec<EqPreset> {
     vec![
-        EqPreset { name: "Flat".to_string(), bands: [0.0, 0.0, 0.0, 0.0, 0.0], preamp: 0.0 },
-        EqPreset { name: "More Bass".to_string(), bands: [6.0, 4.0, 0.0, 0.0, 0.0], preamp: -2.0 },
-        EqPreset { name: "Rock".to_string(), bands: [4.0, 2.0, -1.0, 3.0, 4.0], preamp: -1.0 },
-        EqPreset { name: "Pop".to_string(), bands: [-1.0, 2.0, 4.0, 2.0, -1.0], preamp: 0.0 },
-        EqPreset { name: "Jazz".to_string(), bands: [3.0, 1.0, -1.0, 2.0, 4.0], preamp: 0.0 },
-        EqPreset { name: "Classical".to_string(), bands: [0.0, 0.0, 0.0, 2.0, 4.0], preamp: 0.0 },
-        EqPreset { name: "R&B".to_string(), bands: [5.0, 3.0, -1.0, 2.0, 3.0], preamp: -1.0 },
-        EqPreset { name: "Vocal Boost".to_string(), bands: [-2.0, 0.0, 4.0, 3.0, 1.0], preamp: 0.0 },
+        EqPreset {
+            name: "Flat".to_string(),
+            bands: [0.0, 0.0, 0.0, 0.0, 0.0],
+            preamp: 0.0,
+        },
+        EqPreset {
+            name: "More Bass".to_string(),
+            bands: [6.0, 4.0, 0.0, 0.0, 0.0],
+            preamp: -2.0,
+        },
+        EqPreset {
+            name: "Rock".to_string(),
+            bands: [4.0, 2.0, -1.0, 3.0, 4.0],
+            preamp: -1.0,
+        },
+        EqPreset {
+            name: "Pop".to_string(),
+            bands: [-1.0, 2.0, 4.0, 2.0, -1.0],
+            preamp: 0.0,
+        },
+        EqPreset {
+            name: "Jazz".to_string(),
+            bands: [3.0, 1.0, -1.0, 2.0, 4.0],
+            preamp: 0.0,
+        },
+        EqPreset {
+            name: "Classical".to_string(),
+            bands: [0.0, 0.0, 0.0, 2.0, 4.0],
+            preamp: 0.0,
+        },
+        EqPreset {
+            name: "R&B".to_string(),
+            bands: [5.0, 3.0, -1.0, 2.0, 3.0],
+            preamp: -1.0,
+        },
+        EqPreset {
+            name: "Vocal Boost".to_string(),
+            bands: [-2.0, 0.0, 4.0, 3.0, 1.0],
+            preamp: 0.0,
+        },
     ]
 }
 
@@ -161,16 +201,14 @@ impl BiquadCoeffs {
                     (a + 1.0) + (a - 1.0) * cos_w0 - two_sqrt_a_alpha,
                 )
             }
-            FilterType::Peaking => {
-                (
-                    1.0 + alpha * a,
-                    -2.0 * cos_w0,
-                    1.0 - alpha * a,
-                    1.0 + alpha / a,
-                    -2.0 * cos_w0,
-                    1.0 - alpha / a,
-                )
-            }
+            FilterType::Peaking => (
+                1.0 + alpha * a,
+                -2.0 * cos_w0,
+                1.0 - alpha * a,
+                1.0 + alpha / a,
+                -2.0 * cos_w0,
+                1.0 - alpha / a,
+            ),
             FilterType::HighShelf => {
                 let two_sqrt_a_alpha = 2.0 * a.sqrt() * alpha;
                 (

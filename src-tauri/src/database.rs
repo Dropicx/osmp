@@ -1,14 +1,23 @@
-use rusqlite::{Connection, Result as SqlResult, params};
-use crate::models::{Track, ScanFolder, TrackFilters, Playlist, PlayHistoryEntry};
 use crate::equalizer::EqualizerSettings;
+use crate::models::{PlayHistoryEntry, Playlist, ScanFolder, Track, TrackFilters};
 use anyhow::{Context, Result};
-use std::sync::{Arc, Mutex};
+use rusqlite::{params, Connection, Result as SqlResult};
 use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 
 /// (album, artist, year, track_count, total_duration, most_recent_created_at)
 pub type AlbumInfo = (String, Option<String>, Option<i64>, i64, Option<i64>, i64);
 /// (album, artist, year, track_count, total_duration, most_recent_created_at, file_path, release_mbid)
-pub type AlbumCoverInfo = (String, Option<String>, Option<i64>, i64, Option<i64>, i64, Option<String>, Option<String>);
+pub type AlbumCoverInfo = (
+    String,
+    Option<String>,
+    Option<i64>,
+    i64,
+    Option<i64>,
+    i64,
+    Option<String>,
+    Option<String>,
+);
 
 /// Thread-safe handle to the database.
 ///
@@ -29,12 +38,10 @@ impl DatabaseInner {
         let data_dir = dirs::data_dir()
             .unwrap_or_else(|| std::path::PathBuf::from("."))
             .join("osmp");
-        std::fs::create_dir_all(&data_dir)
-            .context("Failed to create app data directory")?;
+        std::fs::create_dir_all(&data_dir).context("Failed to create app data directory")?;
         let db_path = data_dir.join("osmp.db");
 
-        let conn = Connection::open(&db_path)
-            .context("Failed to open database")?;
+        let conn = Connection::open(&db_path).context("Failed to open database")?;
 
         // Enable WAL mode for crash recovery and concurrent reads
         conn.execute_batch("PRAGMA journal_mode = WAL;")
@@ -71,10 +78,9 @@ impl DatabaseInner {
         )?;
 
         // Add release_mbid column if it doesn't exist (for existing databases)
-        let _ = self.conn.execute(
-            "ALTER TABLE tracks ADD COLUMN release_mbid TEXT",
-            [],
-        );
+        let _ = self
+            .conn
+            .execute("ALTER TABLE tracks ADD COLUMN release_mbid TEXT", []);
 
         self.conn.execute(
             "CREATE TABLE IF NOT EXISTS albums (
@@ -237,7 +243,8 @@ impl DatabaseInner {
     pub fn get_tracks(&self, filters: Option<&TrackFilters>) -> SqlResult<Vec<Track>> {
         let mut query = "SELECT id, file_path, title, artist, album, duration, year, genre,
                         track_number, file_size, file_format, last_modified, metadata_fetched,
-                        release_mbid, created_at FROM tracks WHERE 1=1".to_string();
+                        release_mbid, created_at FROM tracks WHERE 1=1"
+            .to_string();
         let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = vec![];
 
         if let Some(filters) = filters {
@@ -303,7 +310,7 @@ impl DatabaseInner {
              track_number, file_size, file_format, last_modified, metadata_fetched,
              release_mbid, created_at FROM tracks
              WHERE title LIKE ?1 OR artist LIKE ?1 OR album LIKE ?1
-             ORDER BY title COLLATE NOCASE"
+             ORDER BY title COLLATE NOCASE",
         )?;
 
         let rows = stmt.query_map(params![search_term], |row| {
@@ -361,8 +368,15 @@ impl DatabaseInner {
         )
     }
 
-    pub fn update_track_metadata(&mut self, track_id: i64, title: Option<String>, artist: Option<String>,
-                                album: Option<String>, year: Option<i64>, genre: Option<String>) -> SqlResult<()> {
+    pub fn update_track_metadata(
+        &mut self,
+        track_id: i64,
+        title: Option<String>,
+        artist: Option<String>,
+        album: Option<String>,
+        year: Option<i64>,
+        genre: Option<String>,
+    ) -> SqlResult<()> {
         self.conn.execute(
             "UPDATE tracks SET title = ?1, artist = ?2, album = ?3, year = ?4, genre = ?5, metadata_fetched = 1
              WHERE id = ?6",
@@ -372,9 +386,16 @@ impl DatabaseInner {
     }
 
     /// Smart update that only updates fields with values, preserving existing data
-    pub fn update_track_metadata_smart(&mut self, track_id: i64, title: Option<String>, artist: Option<String>,
-                                       album: Option<String>, year: Option<i64>, genre: Option<String>,
-                                       release_mbid: Option<String>) -> SqlResult<()> {
+    pub fn update_track_metadata_smart(
+        &mut self,
+        track_id: i64,
+        title: Option<String>,
+        artist: Option<String>,
+        album: Option<String>,
+        year: Option<i64>,
+        genre: Option<String>,
+        release_mbid: Option<String>,
+    ) -> SqlResult<()> {
         // Build dynamic update query - only update fields that have values
         let mut updates = Vec::new();
         let mut params: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
@@ -444,7 +465,9 @@ impl DatabaseInner {
     }
 
     pub fn get_scan_folders(&self) -> SqlResult<Vec<ScanFolder>> {
-        let mut stmt = self.conn.prepare("SELECT id, path, enabled FROM scan_folders ORDER BY path")?;
+        let mut stmt = self
+            .conn
+            .prepare("SELECT id, path, enabled FROM scan_folders ORDER BY path")?;
         let rows = stmt.query_map([], |row| {
             Ok(ScanFolder {
                 id: row.get(0)?,
@@ -469,12 +492,14 @@ impl DatabaseInner {
     }
 
     pub fn remove_scan_folder(&mut self, id: i64) -> SqlResult<()> {
-        self.conn.execute("DELETE FROM scan_folders WHERE id = ?1", params![id])?;
+        self.conn
+            .execute("DELETE FROM scan_folders WHERE id = ?1", params![id])?;
         Ok(())
     }
 
     pub fn delete_track(&mut self, id: i64) -> SqlResult<()> {
-        self.conn.execute("DELETE FROM tracks WHERE id = ?1", params![id])?;
+        self.conn
+            .execute("DELETE FROM tracks WHERE id = ?1", params![id])?;
         Ok(())
     }
 
@@ -504,7 +529,7 @@ impl DatabaseInner {
             FROM tracks
             WHERE album IS NOT NULL AND album != ''
             GROUP BY album, artist
-            ORDER BY most_recent_created_at DESC, album COLLATE NOCASE"
+            ORDER BY most_recent_created_at DESC, album COLLATE NOCASE",
         )?;
 
         let rows = stmt.query_map([], |row| {
@@ -558,7 +583,7 @@ impl DatabaseInner {
                     CASE WHEN t2.track_number IS NOT NULL THEN t2.track_number ELSE 999999 END
                 LIMIT 1
             )
-            ORDER BY a.most_recent_created_at DESC, a.album COLLATE NOCASE"
+            ORDER BY a.most_recent_created_at DESC, a.album COLLATE NOCASE",
         )?;
 
         let rows = stmt.query_map([], |row| {
@@ -581,10 +606,15 @@ impl DatabaseInner {
         Ok(albums)
     }
 
-    pub fn get_album_tracks(&self, album_name: &str, artist: Option<&str>) -> SqlResult<Vec<Track>> {
+    pub fn get_album_tracks(
+        &self,
+        album_name: &str,
+        artist: Option<&str>,
+    ) -> SqlResult<Vec<Track>> {
         let mut query = "SELECT id, file_path, title, artist, album, duration, year, genre,
                         track_number, file_size, file_format, last_modified, metadata_fetched,
-                        release_mbid, created_at FROM tracks WHERE album = ?1".to_string();
+                        release_mbid, created_at FROM tracks WHERE album = ?1"
+            .to_string();
         let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = vec![Box::new(album_name.to_string())];
 
         if let Some(artist) = artist {
@@ -593,9 +623,11 @@ impl DatabaseInner {
         }
 
         // Order by track_number if available, otherwise by title
-        query.push_str(" ORDER BY 
+        query.push_str(
+            " ORDER BY 
             CASE WHEN track_number IS NOT NULL THEN track_number ELSE 999999 END,
-            title COLLATE NOCASE");
+            title COLLATE NOCASE",
+        );
 
         let mut stmt = self.conn.prepare(&query)?;
         let rows = stmt.query_map(
@@ -628,7 +660,11 @@ impl DatabaseInner {
         Ok(tracks)
     }
 
-    pub fn get_album_first_track_id(&self, album_name: &str, artist: Option<&str>) -> SqlResult<Option<i64>> {
+    pub fn get_album_first_track_id(
+        &self,
+        album_name: &str,
+        artist: Option<&str>,
+    ) -> SqlResult<Option<i64>> {
         // Get first track ID from album, preferring one with release_mbid
         let mut query = "SELECT id FROM tracks WHERE album = ?1".to_string();
         let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = vec![Box::new(album_name.to_string())];
@@ -639,11 +675,13 @@ impl DatabaseInner {
         }
 
         // Prefer tracks with release_mbid, then order by track_number
-        query.push_str(" ORDER BY 
+        query.push_str(
+            " ORDER BY 
             CASE WHEN release_mbid IS NOT NULL THEN 0 ELSE 1 END,
             CASE WHEN track_number IS NOT NULL THEN track_number ELSE 999999 END,
             title COLLATE NOCASE
-            LIMIT 1");
+            LIMIT 1",
+        );
 
         let mut stmt = self.conn.prepare(&query)?;
         let result = stmt.query_row(
@@ -660,9 +698,9 @@ impl DatabaseInner {
 
     /// Get existing file paths with their last_modified timestamps for incremental scanning
     pub fn get_existing_file_info(&self) -> SqlResult<HashMap<String, i64>> {
-        let mut stmt = self.conn.prepare(
-            "SELECT file_path, last_modified FROM tracks"
-        )?;
+        let mut stmt = self
+            .conn
+            .prepare("SELECT file_path, last_modified FROM tracks")?;
 
         let rows = stmt.query_map([], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
@@ -732,10 +770,8 @@ impl DatabaseInner {
 
     // Playlist methods
     pub fn create_playlist(&mut self, name: &str) -> SqlResult<i64> {
-        self.conn.execute(
-            "INSERT INTO playlists (name) VALUES (?1)",
-            params![name],
-        )?;
+        self.conn
+            .execute("INSERT INTO playlists (name) VALUES (?1)", params![name])?;
         Ok(self.conn.last_insert_rowid())
     }
 
@@ -747,10 +783,7 @@ impl DatabaseInner {
             params![id],
         )?;
         // Then delete the playlist
-        tx.execute(
-            "DELETE FROM playlists WHERE id = ?1",
-            params![id],
-        )?;
+        tx.execute("DELETE FROM playlists WHERE id = ?1", params![id])?;
         tx.commit()?;
         Ok(())
     }
@@ -775,7 +808,7 @@ impl DatabaseInner {
             LEFT JOIN playlist_tracks pt ON p.id = pt.playlist_id
             LEFT JOIN tracks t ON pt.track_id = t.id
             GROUP BY p.id, p.name, p.created_at
-            ORDER BY p.name COLLATE NOCASE"
+            ORDER BY p.name COLLATE NOCASE",
         )?;
 
         let rows = stmt.query_map([], |row| {
@@ -829,7 +862,7 @@ impl DatabaseInner {
              FROM tracks t
              INNER JOIN playlist_tracks pt ON t.id = pt.track_id
              WHERE pt.playlist_id = ?1
-             ORDER BY pt.position ASC"
+             ORDER BY pt.position ASC",
         )?;
 
         let rows = stmt.query_map(params![playlist_id], |row| {
@@ -859,7 +892,12 @@ impl DatabaseInner {
         Ok(tracks)
     }
 
-    pub fn add_track_to_playlist(&mut self, playlist_id: i64, track_id: i64, position: Option<i64>) -> SqlResult<()> {
+    pub fn add_track_to_playlist(
+        &mut self,
+        playlist_id: i64,
+        track_id: i64,
+        position: Option<i64>,
+    ) -> SqlResult<()> {
         // If position is not specified, add to end
         let final_position = if let Some(pos) = position {
             pos
@@ -889,7 +927,11 @@ impl DatabaseInner {
         Ok(())
     }
 
-    pub fn add_tracks_to_playlist_batch(&mut self, playlist_id: i64, track_ids: &[i64]) -> SqlResult<()> {
+    pub fn add_tracks_to_playlist_batch(
+        &mut self,
+        playlist_id: i64,
+        track_ids: &[i64],
+    ) -> SqlResult<()> {
         let tx = self.conn.transaction()?;
         let start_position: i64 = tx.query_row(
             "SELECT COALESCE(MAX(position), -1) + 1 FROM playlist_tracks WHERE playlist_id = ?1",
@@ -913,11 +955,14 @@ impl DatabaseInner {
 
     pub fn remove_track_from_playlist(&mut self, playlist_id: i64, track_id: i64) -> SqlResult<()> {
         // Get the position of the track being removed
-        let removed_position: Option<i64> = self.conn.query_row(
-            "SELECT position FROM playlist_tracks WHERE playlist_id = ?1 AND track_id = ?2",
-            params![playlist_id, track_id],
-            |row| row.get(0),
-        ).ok();
+        let removed_position: Option<i64> = self
+            .conn
+            .query_row(
+                "SELECT position FROM playlist_tracks WHERE playlist_id = ?1 AND track_id = ?2",
+                params![playlist_id, track_id],
+                |row| row.get(0),
+            )
+            .ok();
 
         // Delete the track
         self.conn.execute(
@@ -937,30 +982,34 @@ impl DatabaseInner {
         Ok(())
     }
 
-    pub fn reorder_playlist_tracks(&mut self, playlist_id: i64, track_positions: Vec<(i64, i64)>) -> SqlResult<()> {
+    pub fn reorder_playlist_tracks(
+        &mut self,
+        playlist_id: i64,
+        track_positions: Vec<(i64, i64)>,
+    ) -> SqlResult<()> {
         let tx = self.conn.transaction()?;
-        
+
         for (track_id, new_position) in track_positions {
             tx.execute(
                 "UPDATE playlist_tracks SET position = ?1 WHERE playlist_id = ?2 AND track_id = ?3",
                 params![new_position, playlist_id, track_id],
             )?;
         }
-        
+
         tx.commit()?;
         Ok(())
     }
 
     pub fn duplicate_playlist(&mut self, playlist_id: i64, new_name: &str) -> SqlResult<i64> {
         let tx = self.conn.transaction()?;
-        
+
         // Create new playlist
         tx.execute(
             "INSERT INTO playlists (name) VALUES (?1)",
             params![new_name],
         )?;
         let new_playlist_id = tx.last_insert_rowid();
-        
+
         // Copy all tracks with their positions
         tx.execute(
             "INSERT INTO playlist_tracks (playlist_id, track_id, position)
@@ -970,7 +1019,7 @@ impl DatabaseInner {
              ORDER BY position",
             params![new_playlist_id, playlist_id],
         )?;
-        
+
         tx.commit()?;
         Ok(new_playlist_id)
     }
@@ -1073,40 +1122,42 @@ impl DatabaseInner {
              FROM play_history ph
              LEFT JOIN tracks t ON ph.track_id = t.id
              ORDER BY ph.played_at DESC
-             LIMIT ?1"
+             LIMIT ?1",
         )?;
 
-        let entries = stmt.query_map(params![limit], |row| {
-            let track = if let Ok(id) = row.get::<_, i64>(4) {
-                Some(Track {
-                    id,
-                    file_path: row.get(5)?,
-                    title: row.get(6)?,
-                    artist: row.get(7)?,
-                    album: row.get(8)?,
-                    duration: row.get(9)?,
-                    year: row.get(10)?,
-                    genre: row.get(11)?,
-                    track_number: row.get(12)?,
-                    file_size: row.get(13)?,
-                    file_format: row.get(14)?,
-                    last_modified: row.get(15)?,
-                    metadata_fetched: row.get(16)?,
-                    release_mbid: row.get(17)?,
-                    created_at: row.get(18)?,
-                })
-            } else {
-                None
-            };
+        let entries = stmt
+            .query_map(params![limit], |row| {
+                let track = if let Ok(id) = row.get::<_, i64>(4) {
+                    Some(Track {
+                        id,
+                        file_path: row.get(5)?,
+                        title: row.get(6)?,
+                        artist: row.get(7)?,
+                        album: row.get(8)?,
+                        duration: row.get(9)?,
+                        year: row.get(10)?,
+                        genre: row.get(11)?,
+                        track_number: row.get(12)?,
+                        file_size: row.get(13)?,
+                        file_format: row.get(14)?,
+                        last_modified: row.get(15)?,
+                        metadata_fetched: row.get(16)?,
+                        release_mbid: row.get(17)?,
+                        created_at: row.get(18)?,
+                    })
+                } else {
+                    None
+                };
 
-            Ok(PlayHistoryEntry {
-                id: row.get(0)?,
-                track_id: row.get(1)?,
-                played_at: row.get(2)?,
-                duration_listened: row.get(3)?,
-                track,
-            })
-        })?.collect::<Result<Vec<_>, _>>()?;
+                Ok(PlayHistoryEntry {
+                    id: row.get(0)?,
+                    track_id: row.get(1)?,
+                    played_at: row.get(2)?,
+                    duration_listened: row.get(3)?,
+                    track,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
 
         Ok(entries)
     }
@@ -1131,25 +1182,27 @@ impl DatabaseInner {
              ORDER BY LOWER(COALESCE(t1.title, '')), LOWER(COALESCE(t1.artist, '')), t1.id"
         )?;
 
-        let tracks: Vec<Track> = stmt.query_map([], |row| {
-            Ok(Track {
-                id: row.get(0)?,
-                file_path: row.get(1)?,
-                title: row.get(2)?,
-                artist: row.get(3)?,
-                album: row.get(4)?,
-                duration: row.get(5)?,
-                year: row.get(6)?,
-                genre: row.get(7)?,
-                track_number: row.get(8)?,
-                file_size: row.get(9)?,
-                file_format: row.get(10)?,
-                last_modified: row.get(11)?,
-                metadata_fetched: row.get(12)?,
-                release_mbid: row.get(13)?,
-                created_at: row.get(14)?,
-            })
-        })?.collect::<Result<Vec<_>, _>>()?;
+        let tracks: Vec<Track> = stmt
+            .query_map([], |row| {
+                Ok(Track {
+                    id: row.get(0)?,
+                    file_path: row.get(1)?,
+                    title: row.get(2)?,
+                    artist: row.get(3)?,
+                    album: row.get(4)?,
+                    duration: row.get(5)?,
+                    year: row.get(6)?,
+                    genre: row.get(7)?,
+                    track_number: row.get(8)?,
+                    file_size: row.get(9)?,
+                    file_format: row.get(10)?,
+                    last_modified: row.get(11)?,
+                    metadata_fetched: row.get(12)?,
+                    release_mbid: row.get(13)?,
+                    created_at: row.get(14)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
 
         // Group duplicates together
         let mut groups: Vec<Vec<Track>> = Vec::new();
@@ -1215,28 +1268,30 @@ impl DatabaseInner {
             "SELECT id, file_path, title, artist, album, duration, year, genre,
                     track_number, file_size, file_format, last_modified, metadata_fetched,
                     release_mbid, created_at
-             FROM tracks WHERE file_path = ?1"
+             FROM tracks WHERE file_path = ?1",
         )?;
 
-        let tracks = stmt.query_map(params![path], |row| {
-            Ok(Track {
-                id: row.get(0)?,
-                file_path: row.get(1)?,
-                title: row.get(2)?,
-                artist: row.get(3)?,
-                album: row.get(4)?,
-                duration: row.get(5)?,
-                year: row.get(6)?,
-                genre: row.get(7)?,
-                track_number: row.get(8)?,
-                file_size: row.get(9)?,
-                file_format: row.get(10)?,
-                last_modified: row.get(11)?,
-                metadata_fetched: row.get(12)?,
-                release_mbid: row.get(13)?,
-                created_at: row.get(14)?,
-            })
-        })?.collect::<Result<Vec<_>, _>>()?;
+        let tracks = stmt
+            .query_map(params![path], |row| {
+                Ok(Track {
+                    id: row.get(0)?,
+                    file_path: row.get(1)?,
+                    title: row.get(2)?,
+                    artist: row.get(3)?,
+                    album: row.get(4)?,
+                    duration: row.get(5)?,
+                    year: row.get(6)?,
+                    genre: row.get(7)?,
+                    track_number: row.get(8)?,
+                    file_size: row.get(9)?,
+                    file_format: row.get(10)?,
+                    last_modified: row.get(11)?,
+                    metadata_fetched: row.get(12)?,
+                    release_mbid: row.get(13)?,
+                    created_at: row.get(14)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
 
         Ok(tracks)
     }
@@ -1250,12 +1305,12 @@ mod tests {
     fn create_test_db() -> Result<DatabaseInner> {
         let temp_dir = TempDir::new().unwrap();
         let db_path = temp_dir.path().join("test.db");
-        
+
         // Create a new database connection
         let conn = Connection::open(&db_path)?;
         conn.execute_batch("PRAGMA journal_mode = WAL;")?;
         conn.execute_batch("PRAGMA foreign_keys = ON;")?;
-        
+
         let mut db = DatabaseInner { conn };
         db.init_schema()?;
         Ok(db)
@@ -1270,7 +1325,7 @@ mod tests {
     #[test]
     fn test_insert_and_get_track() -> SqlResult<()> {
         let mut db = create_test_db().unwrap();
-        
+
         let track = Track {
             id: 0,
             file_path: "/test/path.mp3".to_string(),
@@ -1291,7 +1346,7 @@ mod tests {
 
         let id = db.insert_track(&track)?;
         let retrieved = db.get_track_by_id(id)?;
-        
+
         assert_eq!(retrieved.title, track.title);
         assert_eq!(retrieved.artist, track.artist);
         assert_eq!(retrieved.album, track.album);
@@ -1301,7 +1356,7 @@ mod tests {
     #[test]
     fn test_search_tracks() -> SqlResult<()> {
         let mut db = create_test_db().unwrap();
-        
+
         // Insert test tracks
         let track1 = Track {
             id: 0,
@@ -1356,21 +1411,21 @@ mod tests {
     #[test]
     fn test_create_and_get_playlist() -> SqlResult<()> {
         let mut db = create_test_db().unwrap();
-        
+
         let playlist_id = db.create_playlist("Test Playlist")?;
         let playlists = db.get_playlists()?;
-        
+
         assert_eq!(playlists.len(), 1);
         assert_eq!(playlists[0].name, "Test Playlist");
         assert_eq!(playlists[0].id, playlist_id);
-        
+
         Ok(())
     }
 
     #[test]
     fn test_add_track_to_playlist() -> SqlResult<()> {
         let mut db = create_test_db().unwrap();
-        
+
         // Create track and playlist
         let track = Track {
             id: 0,
@@ -1389,18 +1444,18 @@ mod tests {
             release_mbid: None,
             created_at: 1234567890,
         };
-        
+
         let track_id = db.insert_track(&track)?;
         let playlist_id = db.create_playlist("Test Playlist")?;
-        
+
         // Add track to playlist
         db.add_track_to_playlist(playlist_id, track_id, None)?;
-        
+
         // Get playlist tracks
         let tracks = db.get_playlist_tracks(playlist_id)?;
         assert_eq!(tracks.len(), 1);
         assert_eq!(tracks[0].id, track_id);
-        
+
         Ok(())
     }
 }

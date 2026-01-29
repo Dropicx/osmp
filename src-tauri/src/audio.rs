@@ -1,15 +1,15 @@
+use crate::equalizer::{bump_settings_version, EqualizerSettings, EqualizerSource};
+use anyhow::{Context, Result};
 use rodio::{Decoder, OutputStreamBuilder, Sink};
 use std::fs::File;
 use std::io::BufReader;
-use std::sync::mpsc::{channel, Sender, RecvTimeoutError};
-use std::time::Duration;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::mpsc::{channel, RecvTimeoutError, Sender};
 use std::sync::{Arc, RwLock};
 use std::thread;
+use std::time::Duration;
 use std::time::Instant;
-use anyhow::{Context, Result};
-use crate::equalizer::{EqualizerSettings, EqualizerSource, bump_settings_version};
-use tracing::{info, error};
+use tracing::{error, info};
 
 // Commands sent to the audio thread
 pub enum AudioCommand {
@@ -20,9 +20,16 @@ pub enum AudioCommand {
     Seek(f64), // Seek to position in seconds
     SetSpeed(f32),
     PreloadNext(String),
-    SetEqBand { band: usize, gain_db: f32 },
+    SetEqBand {
+        band: usize,
+        gain_db: f32,
+    },
     SetEqEnabled(bool),
-    SetEqPreset { bands: [f32; 5], preamp: f32, name: String },
+    SetEqPreset {
+        bands: [f32; 5],
+        preamp: f32,
+        name: String,
+    },
     SetEqPreamp(f32),
 }
 
@@ -97,7 +104,9 @@ impl AudioController {
                                 }
 
                                 // Stream audio with 256KB buffered reader to prevent micro-lags
-                                match File::open(&file_path).map(|f| BufReader::with_capacity(256 * 1024, f)) {
+                                match File::open(&file_path)
+                                    .map(|f| BufReader::with_capacity(256 * 1024, f))
+                                {
                                     Ok(reader) => {
                                         match Decoder::new(reader) {
                                             Ok(source) => {
@@ -117,9 +126,15 @@ impl AudioController {
                                                 paused_position_ms = 0;
                                                 preloaded_path = None;
 
-                                                thread_state.is_playing.store(true, Ordering::Relaxed);
-                                                thread_state.is_paused.store(false, Ordering::Relaxed);
-                                                thread_state.position_ms.store(0, Ordering::Relaxed);
+                                                thread_state
+                                                    .is_playing
+                                                    .store(true, Ordering::Relaxed);
+                                                thread_state
+                                                    .is_paused
+                                                    .store(false, Ordering::Relaxed);
+                                                thread_state
+                                                    .position_ms
+                                                    .store(0, Ordering::Relaxed);
                                             }
                                             Err(e) => error!("Failed to decode audio: {}", e),
                                         }
@@ -138,7 +153,8 @@ impl AudioController {
                                     } else {
                                         // Pause
                                         if let Some(start) = playback_start {
-                                            paused_position_ms += start.elapsed().as_millis() as u64;
+                                            paused_position_ms +=
+                                                start.elapsed().as_millis() as u64;
                                         }
                                         sink.pause();
                                         thread_state.is_paused.store(true, Ordering::Relaxed);
@@ -171,7 +187,9 @@ impl AudioController {
 
                                     paused_position_ms = (position_secs * 1000.0) as u64;
                                     playback_start = Some(Instant::now());
-                                    thread_state.position_ms.store(paused_position_ms, Ordering::Relaxed);
+                                    thread_state
+                                        .position_ms
+                                        .store(paused_position_ms, Ordering::Relaxed);
                                 }
                             }
 
@@ -205,7 +223,11 @@ impl AudioController {
                                 bump_settings_version();
                             }
 
-                            AudioCommand::SetEqPreset { bands, preamp, name } => {
+                            AudioCommand::SetEqPreset {
+                                bands,
+                                preamp,
+                                name,
+                            } => {
                                 if let Ok(mut settings) = thread_eq_settings.write() {
                                     for (i, &gain) in bands.iter().enumerate() {
                                         if i < 5 {
@@ -236,19 +258,28 @@ impl AudioController {
                 }
 
                 // Update position
-                if thread_state.is_playing.load(Ordering::Relaxed) && !thread_state.is_paused.load(Ordering::Relaxed) {
+                if thread_state.is_playing.load(Ordering::Relaxed)
+                    && !thread_state.is_paused.load(Ordering::Relaxed)
+                {
                     if let Some(start) = playback_start {
                         let current_pos = paused_position_ms + start.elapsed().as_millis() as u64;
-                        thread_state.position_ms.store(current_pos, Ordering::Relaxed);
+                        thread_state
+                            .position_ms
+                            .store(current_pos, Ordering::Relaxed);
                     }
                 }
 
                 // Check if playback finished - handle gapless transition
                 if let Some(ref sink) = current_sink {
-                    if sink.empty() && !sink.is_paused() && thread_state.is_playing.load(Ordering::Relaxed) {
+                    if sink.empty()
+                        && !sink.is_paused()
+                        && thread_state.is_playing.load(Ordering::Relaxed)
+                    {
                         if let Some(next_path) = preloaded_path.take() {
                             // Gapless: immediately start preloaded track
-                            match File::open(&next_path).map(|f| BufReader::with_capacity(256 * 1024, f)) {
+                            match File::open(&next_path)
+                                .map(|f| BufReader::with_capacity(256 * 1024, f))
+                            {
                                 Ok(reader) => {
                                     if let Ok(source) = Decoder::new(reader) {
                                         let eq_source = EqualizerSource::new(
@@ -311,7 +342,9 @@ impl AudioController {
     }
 
     pub fn preload_next(&self, file_path: &str) {
-        let _ = self.sender.send(AudioCommand::PreloadNext(file_path.to_string()));
+        let _ = self
+            .sender
+            .send(AudioCommand::PreloadNext(file_path.to_string()));
     }
 
     pub fn set_eq_band(&self, band: usize, gain_db: f32) {
@@ -323,7 +356,11 @@ impl AudioController {
     }
 
     pub fn set_eq_preset(&self, bands: [f32; 5], preamp: f32, name: String) {
-        let _ = self.sender.send(AudioCommand::SetEqPreset { bands, preamp, name });
+        let _ = self.sender.send(AudioCommand::SetEqPreset {
+            bands,
+            preamp,
+            name,
+        });
     }
 
     pub fn set_eq_preamp(&self, preamp_db: f32) {
@@ -331,7 +368,9 @@ impl AudioController {
     }
 
     pub fn get_eq_settings(&self) -> EqualizerSettings {
-        self.state.eq_settings.read()
+        self.state
+            .eq_settings
+            .read()
             .map(|s| s.clone())
             .unwrap_or_default()
     }

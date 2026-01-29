@@ -5,11 +5,26 @@ on:
     tags:
       - "v*.*.*"
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   quality-check:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            libssl-dev \
+            libasound2-dev \
+            patchelf
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -17,8 +32,27 @@ jobs:
           node-version: 20
           cache: npm
 
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Cache Rust dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            src-tauri/target
+          key: ${{ runner.os }}-cargo-quality-${{ hashFiles('src-tauri/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-quality-
+
       - name: Install dependencies
         run: npm ci
+
+      - name: Audit dependencies
+        run: npm audit --audit-level=high
 
       - name: Lint
         run: npm run lint
@@ -32,69 +66,39 @@ jobs:
       - name: Test with coverage
         run: npx vitest run --coverage --coverage.thresholds.lines=18 --coverage.thresholds.functions=35 --coverage.thresholds.branches=60
 
-  build-macos:
+      - name: Rust format check
+        run: cargo fmt --manifest-path src-tauri/Cargo.toml --check
+
+      - name: Rust clippy
+        run: cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings
+
+  build:
     needs: quality-check
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: npm
-
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache Rust dependencies
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            src-tauri/target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('src-tauri/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Build frontend
-        run: npm run build
-
-      - name: Build Tauri app
-        run: npx tauri build
-        env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-
-      - name: List bundle outputs
-        run: find src-tauri/target/release/bundle -type f | sort
-
-      - name: Upload DMG artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: macos-dmg
-          path: src-tauri/target/release/bundle/dmg/*.dmg
-
-      - name: Upload macOS updater artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: macos-updater
-          if-no-files-found: ignore
-          path: |
-            src-tauri/target/release/bundle/macos/*.tar.gz
-            src-tauri/target/release/bundle/macos/*.tar.gz.sig
-
-  build-linux:
-    needs: quality-check
-    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos
+            runner: macos-latest
+            artifact-name: macos-dmg
+            artifact-path: src-tauri/target/release/bundle/dmg/*.dmg
+            updater-name: macos-updater
+            updater-path: |
+              src-tauri/target/release/bundle/macos/*.tar.gz
+              src-tauri/target/release/bundle/macos/*.tar.gz.sig
+          - os: linux
+            runner: ubuntu-22.04
+            artifact-name: linux-appimage
+            artifact-path: src-tauri/target/release/bundle/appimage/*.AppImage
+            updater-name: linux-updater
+            updater-path: |
+              src-tauri/target/release/bundle/appimage/*.AppImage.sig
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
 
       - name: Install system dependencies
+        if: matrix.os == 'linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -137,25 +141,21 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
 
-      - name: List bundle outputs
-        run: find src-tauri/target/release/bundle -type f | sort
-
-      - name: Upload AppImage artifact
+      - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: linux-appimage
-          path: src-tauri/target/release/bundle/appimage/*.AppImage
+          name: ${{ matrix.artifact-name }}
+          path: ${{ matrix.artifact-path }}
 
-      - name: Upload Linux updater artifact
+      - name: Upload updater artifact
         uses: actions/upload-artifact@v4
         with:
-          name: linux-updater
+          name: ${{ matrix.updater-name }}
           if-no-files-found: ignore
-          path: |
-            src-tauri/target/release/bundle/appimage/*.AppImage.sig
+          path: ${{ matrix.updater-path }}
 
   release:
-    needs: [build-macos, build-linux]
+    needs: build
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -167,6 +167,34 @@ jobs:
         with:
           path: artifacts
           merge-multiple: false
+
+      - name: Extract changelog for release notes
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          # Extract the section for this version from CHANGELOG.md
+          awk -v ver="$VERSION" '
+            /^## \[/ {
+              if (found) exit
+              if (index($0, "[" ver "]")) found=1
+              next
+            }
+            found { print }
+          ' CHANGELOG.md > release_notes.md
+
+          # Fallback if no changelog entry found
+          if [ ! -s release_notes.md ]; then
+            echo "Release ${GITHUB_REF_NAME}" > release_notes.md
+          fi
+
+          echo "Release notes:"
+          cat release_notes.md
+
+      - name: Generate SHA256 checksums
+        run: |
+          find artifacts -type f \( -name "*.dmg" -o -name "*.AppImage" -o -name "*.tar.gz" \) \
+            -exec sha256sum {} + > checksums.txt
+          echo "Checksums:"
+          cat checksums.txt
 
       - name: Generate latest.json
         run: |
@@ -246,11 +274,12 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          generate_release_notes: true
+          body_path: release_notes.md
           files: |
             artifacts/macos-dmg/*.dmg
             artifacts/linux-appimage/*.AppImage
             artifacts/macos-updater/*.tar.gz
             artifacts/macos-updater/*.tar.gz.sig
             artifacts/linux-updater/*.AppImage.sig
+            checksums.txt
             latest.json

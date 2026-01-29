@@ -1,33 +1,33 @@
-pub mod models;
-pub mod database;
-mod scanner;
-mod metadata;
 mod audio;
+mod background_scan;
 mod commands;
-mod media_controls;
+pub mod database;
 mod equalizer;
 pub mod error;
+mod media_controls;
+mod metadata;
+pub mod models;
 pub mod playlist_io;
-mod background_scan;
+mod scanner;
 
-#[cfg(target_os = "linux")]
-mod media_controls_mpris;
 #[cfg(target_os = "macos")]
 #[allow(unused_imports)]
 mod media_controls_macos;
+#[cfg(target_os = "linux")]
+mod media_controls_mpris;
 #[cfg(target_os = "windows")]
 mod media_controls_windows;
 
-use commands::*;
 use audio::AudioController;
+use commands::*;
 use database::{Database, DatabaseInner};
-use media_controls::{MediaControlsManager, MediaControlEvent, PlaybackState};
-use std::sync::{Arc, Mutex, RwLock};
+use media_controls::{MediaControlEvent, MediaControlsManager, PlaybackState};
 use std::sync::atomic::AtomicBool;
+use std::sync::{Arc, Mutex, RwLock};
 use std::time::Instant;
-use tokio::sync::mpsc;
 use tauri::Emitter;
-use tracing::{info, warn, error};
+use tokio::sync::mpsc;
+use tracing::{error, info, warn};
 
 pub struct AppState {
     pub db: Database,
@@ -35,7 +35,8 @@ pub struct AppState {
     pub scan_cancelled: Arc<AtomicBool>,
     pub scan_running: Arc<AtomicBool>,
     pub media_controls: Option<Arc<MediaControlsManager>>,
-    pub media_control_event_sender: Option<mpsc::UnboundedSender<media_controls::MediaControlEvent>>,
+    pub media_control_event_sender:
+        Option<mpsc::UnboundedSender<media_controls::MediaControlEvent>>,
     pub http_client: reqwest::Client,
 }
 
@@ -45,7 +46,7 @@ pub fn run() {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("osmp_lib=info,warn"))
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("osmp_lib=info,warn")),
         )
         .with_target(false)
         .init();
@@ -71,7 +72,8 @@ pub fn run() {
                 std::process::exit(1);
             }
         };
-        db_lock.load_eq_settings()
+        db_lock
+            .load_eq_settings()
             .ok()
             .flatten()
             .unwrap_or_default()
@@ -92,7 +94,10 @@ pub fn run() {
     let http_client = match reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(15))
         .pool_max_idle_per_host(2)
-        .user_agent(format!("OSMP/{} (https://github.com/Dropicx/osmp)", env!("CARGO_PKG_VERSION")))
+        .user_agent(format!(
+            "OSMP/{} (https://github.com/Dropicx/osmp)",
+            env!("CARGO_PKG_VERSION")
+        ))
         .build()
     {
         Ok(client) => client,
@@ -108,9 +113,7 @@ pub fn run() {
 
     // Initialize media controls (may fail on unsupported platforms, that's OK)
     let (media_controls, media_control_receiver) = match MediaControlsManager::new() {
-        Ok((manager, receiver)) => {
-            (Some(Arc::new(manager)), Some(receiver))
-        }
+        Ok((manager, receiver)) => (Some(Arc::new(manager)), Some(receiver)),
         Err(e) => {
             warn!("Media controls not available: {}", e);
             (None, None)
@@ -160,10 +163,14 @@ pub fn run() {
                     while let Some(event) = receiver.recv().await {
                         info!("[MediaControls] Received event: {:?}", event);
                         match event {
-                            MediaControlEvent::Play | MediaControlEvent::Pause | MediaControlEvent::PlayPause => {
+                            MediaControlEvent::Play
+                            | MediaControlEvent::Pause
+                            | MediaControlEvent::PlayPause => {
                                 // Debounce: ignore events within 300ms of last toggle
                                 let now = Instant::now();
-                                if now.duration_since(last_toggle) < std::time::Duration::from_millis(300) {
+                                if now.duration_since(last_toggle)
+                                    < std::time::Duration::from_millis(300)
+                                {
                                     info!("[MediaControls] Debounced, skipping");
                                     continue;
                                 }
@@ -196,8 +203,12 @@ pub fn run() {
                                     }
 
                                     // Emit authoritative state to frontend
-                                    let _ = app_handle.emit("playback-state-changed", new_is_playing);
-                                    info!("[MediaControls] Toggled: new_is_playing={}", new_is_playing);
+                                    let _ =
+                                        app_handle.emit("playback-state-changed", new_is_playing);
+                                    info!(
+                                        "[MediaControls] Toggled: new_is_playing={}",
+                                        new_is_playing
+                                    );
                                 }
                             }
                             MediaControlEvent::Next => {
@@ -292,5 +303,9 @@ pub fn run() {
             set_scan_settings
         ])
         .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .unwrap_or_else(|e| {
+            error!("Fatal: Tauri application failed to start: {}", e);
+            eprintln!("Fatal: Failed to start application: {}", e);
+            std::process::exit(1);
+        });
 }

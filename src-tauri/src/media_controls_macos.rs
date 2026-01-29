@@ -1,14 +1,16 @@
-use crate::media_controls::{MediaControlEvent, MediaControlsPlatform, MediaMetadata, PlaybackState};
+use crate::media_controls::{
+    MediaControlEvent, MediaControlsPlatform, MediaMetadata, PlaybackState,
+};
 use block2::RcBlock;
 use objc2::rc::Retained;
 use objc2::runtime::AnyObject;
 use objc2_foundation::{NSMutableDictionary, NSNumber, NSString};
 use objc2_media_player::{
-    MPChangePlaybackPositionCommandEvent, MPMediaItemPropertyAlbumTitle,
-    MPMediaItemPropertyArtist, MPMediaItemPropertyPlaybackDuration, MPMediaItemPropertyTitle,
-    MPNowPlayingInfoCenter, MPNowPlayingInfoPropertyElapsedPlaybackTime,
-    MPNowPlayingInfoPropertyPlaybackRate, MPNowPlayingPlaybackState, MPRemoteCommandCenter,
-    MPRemoteCommandEvent, MPRemoteCommandHandlerStatus,
+    MPChangePlaybackPositionCommandEvent, MPMediaItemPropertyAlbumTitle, MPMediaItemPropertyArtist,
+    MPMediaItemPropertyPlaybackDuration, MPMediaItemPropertyTitle, MPNowPlayingInfoCenter,
+    MPNowPlayingInfoPropertyElapsedPlaybackTime, MPNowPlayingInfoPropertyPlaybackRate,
+    MPNowPlayingPlaybackState, MPRemoteCommandCenter, MPRemoteCommandEvent,
+    MPRemoteCommandHandlerStatus,
 };
 use std::ptr::NonNull;
 use tokio::sync::mpsc;
@@ -176,7 +178,10 @@ impl MacOSControls {
 
 impl MediaControlsPlatform for MacOSControls {
     fn update_metadata(&self, metadata: &MediaMetadata) -> Result<(), String> {
-        eprintln!("[MediaControls] update_metadata: title={}, artist={}, duration={}", metadata.title, metadata.artist, metadata.duration);
+        eprintln!(
+            "[MediaControls] update_metadata: title={}, artist={}, duration={}",
+            metadata.title, metadata.artist, metadata.duration
+        );
         unsafe {
             let info_center = MPNowPlayingInfoCenter::defaultCenter();
             let dict: Retained<NSMutableDictionary<NSString, AnyObject>> =
@@ -270,7 +275,11 @@ impl MediaControlsPlatform for MacOSControls {
         Ok(())
     }
 
-    fn set_available_actions(&self, can_go_next: bool, can_go_previous: bool) -> Result<(), String> {
+    fn set_available_actions(
+        &self,
+        can_go_next: bool,
+        can_go_previous: bool,
+    ) -> Result<(), String> {
         unsafe {
             let center = MPRemoteCommandCenter::sharedCommandCenter();
             center.nextTrackCommand().setEnabled(can_go_next);
