@@ -164,10 +164,13 @@ export default function Dashboard() {
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
+  const hour = new Date().getHours();
+  const greeting = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
+
   return (
     <div className="space-y-8">
       <div>
-        <h1 className="text-4xl font-bold mb-2 text-text-primary">Good evening</h1>
+        <h1 className="text-4xl font-bold mb-2 text-text-primary">{greeting}</h1>
         <p className="text-text-tertiary">Welcome back to OSMP</p>
       </div>
 
