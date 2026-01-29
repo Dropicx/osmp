@@ -1,175 +1,175 @@
-use crate::media_controls::{MediaControlsPlatform, MediaControlEvent, MediaMetadata, PlaybackState};
-use mpris_server::{PlaybackStatus, Player, PlayerBuilder};
-use std::sync::{Arc, Mutex};
+use crate::media_controls::{
+    MediaControlEvent, MediaControlsPlatform, MediaMetadata, PlaybackState,
+};
+use mpris_server::{Metadata, PlaybackStatus, Player, Time};
+use std::sync::Mutex;
 use tokio::sync::mpsc;
-use zbus::Connection;
+
+enum MprisCommand {
+    UpdateMetadata(MediaMetadata),
+    UpdatePlaybackState(PlaybackState),
+    UpdatePosition(f64),
+    SetAvailableActions(bool, bool),
+}
 
 pub struct MprisControls {
-    player: Arc<Mutex<Option<Player>>>,
-    event_sender: mpsc::UnboundedSender<MediaControlEvent>,
-    connection: Arc<Mutex<Option<Connection>>>,
-    runtime: Arc<tokio::runtime::Runtime>,
+    command_sender: Mutex<mpsc::UnboundedSender<MprisCommand>>,
 }
 
 impl MprisControls {
-    pub fn new(event_sender: mpsc::UnboundedSender<MediaControlEvent>) -> Result<Self, Box<dyn std::error::Error>> {
-        let player = Arc::new(Mutex::new(None));
-        let connection = Arc::new(Mutex::new(None));
-        let runtime = Arc::new(tokio::runtime::Runtime::new()?);
-
-        // Create player on a separate thread since zbus requires async runtime
-        let player_clone = Arc::clone(&player);
-        let connection_clone = Arc::clone(&connection);
-        let event_sender_clone = event_sender.clone();
-        let rt_clone = Arc::clone(&runtime);
+    pub fn new(
+        event_sender: mpsc::UnboundedSender<MediaControlEvent>,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
+        let (cmd_tx, cmd_rx) = mpsc::unbounded_channel::<MprisCommand>();
 
         std::thread::spawn(move || {
-            rt_clone.block_on(async {
-                match Self::setup_player(event_sender_clone).await {
-                    Ok((p, conn)) => {
-                        if let Ok(mut guard) = player_clone.lock() {
-                            *guard = Some(p);
-                        }
-                        if let Ok(mut guard) = connection_clone.lock() {
-                            *guard = Some(conn);
-                        }
-                    }
-                    Err(e) => {
-                        eprintln!("Failed to setup MPRIS player: {}", e);
-                    }
+            let rt = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
+            let local = tokio::task::LocalSet::new();
+            local.block_on(&rt, async move {
+                if let Err(e) = Self::run_player(event_sender, cmd_rx).await {
+                    eprintln!("Failed to run MPRIS player: {}", e);
                 }
             });
         });
 
         Ok(MprisControls {
-            player,
-            event_sender,
-            connection,
-            runtime,
+            command_sender: Mutex::new(cmd_tx),
         })
     }
 
-    async fn setup_player(
+    async fn run_player(
         event_sender: mpsc::UnboundedSender<MediaControlEvent>,
-    ) -> Result<(Player, Connection), Box<dyn std::error::Error>> {
-        let connection = Connection::session().await?;
-        
-        let player = PlayerBuilder::new("OSMP", 100)
-            .can_raise(false)
-            .can_quit(false)
-            .can_set_fullscreen(false)
-            .has_track_list(false)
+        mut cmd_rx: mpsc::UnboundedReceiver<MprisCommand>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let player = Player::builder("OSMP")
+            .can_play(true)
+            .can_pause(true)
+            .can_go_next(true)
+            .can_go_previous(true)
+            .can_seek(true)
             .build()
             .await?;
 
-        // Set up event handlers
-        let player_clone = player.clone();
-        player.on_next(move || {
-            let _ = event_sender.send(MediaControlEvent::Next);
+        let es = event_sender.clone();
+        player.connect_next(move |_| {
+            let _ = es.send(MediaControlEvent::Next);
         });
 
-        let player_clone = player.clone();
-        player.on_previous(move || {
-            let _ = event_sender.send(MediaControlEvent::Previous);
+        let es = event_sender.clone();
+        player.connect_previous(move |_| {
+            let _ = es.send(MediaControlEvent::Previous);
         });
 
-        let player_clone = player.clone();
-        player.on_play_pause(move || {
-            let _ = event_sender.send(MediaControlEvent::PlayPause);
+        let es = event_sender.clone();
+        player.connect_play_pause(move |_| {
+            let _ = es.send(MediaControlEvent::PlayPause);
         });
 
-        let player_clone = player.clone();
-        player.on_play(move || {
-            let _ = event_sender.send(MediaControlEvent::Play);
+        let es = event_sender.clone();
+        player.connect_play(move |_| {
+            let _ = es.send(MediaControlEvent::Play);
         });
 
-        let player_clone = player.clone();
-        player.on_pause(move || {
-            let _ = event_sender.send(MediaControlEvent::Pause);
+        let es = event_sender.clone();
+        player.connect_pause(move |_| {
+            let _ = es.send(MediaControlEvent::Pause);
         });
 
-        let player_clone = player.clone();
-        player.on_stop(move || {
-            let _ = event_sender.send(MediaControlEvent::Stop);
+        let es = event_sender;
+        player.connect_stop(move |_| {
+            let _ = es.send(MediaControlEvent::Stop);
         });
 
-        player.set_playback_status(PlaybackStatus::Stopped).await?;
-        player.set_can_play(true).await?;
-        player.set_can_pause(true).await?;
-        player.set_can_go_next(true).await?;
-        player.set_can_go_previous(true).await?;
-        player.set_can_seek(true).await?;
+        // Start the D-Bus server for handling incoming MPRIS requests
+        tokio::task::spawn_local(player.run());
 
-        // Register the player on D-Bus
-        connection
-            .object_server()
-            .at("/org/mpris/MediaPlayer2", player.clone())
-            .await?;
+        // Process commands from the main thread
+        while let Some(cmd) = cmd_rx.recv().await {
+            match cmd {
+                MprisCommand::UpdateMetadata(meta) => {
+                    let mpris_meta = Metadata::builder()
+                        .title(meta.title)
+                        .artist([meta.artist])
+                        .album(meta.album)
+                        .length(Time::from_micros((meta.duration * 1_000_000.0) as i64))
+                        .build();
+                    if let Err(e) = player.set_metadata(mpris_meta).await {
+                        eprintln!("Failed to set MPRIS metadata: {}", e);
+                    }
+                }
+                MprisCommand::UpdatePlaybackState(state) => {
+                    let status = match state {
+                        PlaybackState::Playing => PlaybackStatus::Playing,
+                        PlaybackState::Paused => PlaybackStatus::Paused,
+                        PlaybackState::Stopped => PlaybackStatus::Stopped,
+                    };
+                    if let Err(e) = player.set_playback_status(status).await {
+                        eprintln!("Failed to set MPRIS playback status: {}", e);
+                    }
+                }
+                MprisCommand::UpdatePosition(position) => {
+                    player.set_position(Time::from_micros((position * 1_000_000.0) as i64));
+                }
+                MprisCommand::SetAvailableActions(next, prev) => {
+                    if let Err(e) = player.set_can_go_next(next).await {
+                        eprintln!("Failed to set MPRIS can_go_next: {}", e);
+                    }
+                    if let Err(e) = player.set_can_go_previous(prev).await {
+                        eprintln!("Failed to set MPRIS can_go_previous: {}", e);
+                    }
+                }
+            }
+        }
 
-        Ok((player, connection))
+        Ok(())
     }
 }
 
 impl MediaControlsPlatform for MprisControls {
     fn update_metadata(&self, metadata: &MediaMetadata) -> Result<(), String> {
-        let player_guard = self.player.lock().map_err(|e| format!("Lock error: {}", e))?;
-        if let Some(ref player) = *player_guard {
-            self.runtime.block_on(async {
-                let mut mpris_metadata = mpris_server::Metadata::empty();
-                mpris_metadata.set_title(&metadata.title);
-                mpris_metadata.set_artists(&[metadata.artist.clone()]);
-                mpris_metadata.set_album(&metadata.album);
-                mpris_metadata.set_length(metadata.duration as u64 * 1_000_000); // Convert to microseconds
-                
-                // Set artwork if available
-                if let Some(ref artwork) = metadata.artwork {
-                    // MPRIS expects artwork as a file:// URL or data URI
-                    // For simplicity, we'll skip artwork for now or convert to base64
-                    // mpris_metadata.set_art_url(&format!("data:image/jpeg;base64,{}", base64::encode(artwork)));
-                }
-                
-                player.set_metadata(mpris_metadata).await
-            }).map_err(|e| format!("Failed to update MPRIS metadata: {}", e))?;
-        }
-        Ok(())
+        let sender = self
+            .command_sender
+            .lock()
+            .map_err(|e| format!("Lock error: {}", e))?;
+        sender
+            .send(MprisCommand::UpdateMetadata(metadata.clone()))
+            .map_err(|e| format!("Failed to send metadata command: {}", e))
     }
 
     fn update_playback_state(&self, state: PlaybackState) -> Result<(), String> {
-        let player_guard = self.player.lock().map_err(|e| format!("Lock error: {}", e))?;
-        if let Some(ref player) = *player_guard {
-            self.runtime.block_on(async {
-                let playback_status = match state {
-                    PlaybackState::Playing => PlaybackStatus::Playing,
-                    PlaybackState::Paused => PlaybackStatus::Paused,
-                    PlaybackState::Stopped => PlaybackStatus::Stopped,
-                };
-                player.set_playback_status(playback_status).await
-            }).map_err(|e| format!("Failed to update MPRIS playback state: {}", e))?;
-        }
-        Ok(())
+        let sender = self
+            .command_sender
+            .lock()
+            .map_err(|e| format!("Lock error: {}", e))?;
+        sender
+            .send(MprisCommand::UpdatePlaybackState(state))
+            .map_err(|e| format!("Failed to send playback state command: {}", e))
     }
 
     fn update_position(&self, position: f64) -> Result<(), String> {
-        let player_guard = self.player.lock().map_err(|e| format!("Lock error: {}", e))?;
-        if let Some(ref player) = *player_guard {
-            self.runtime.block_on(async {
-                // MPRIS position is in microseconds
-                let position_us = (position * 1_000_000.0) as i64;
-                player.set_position(position_us).await
-            }).map_err(|e| format!("Failed to update MPRIS position: {}", e))?;
-        }
-        Ok(())
+        let sender = self
+            .command_sender
+            .lock()
+            .map_err(|e| format!("Lock error: {}", e))?;
+        sender
+            .send(MprisCommand::UpdatePosition(position))
+            .map_err(|e| format!("Failed to send position command: {}", e))
     }
 
-    fn set_available_actions(&self, can_go_next: bool, can_go_previous: bool) -> Result<(), String> {
-        let player_guard = self.player.lock().map_err(|e| format!("Lock error: {}", e))?;
-        if let Some(ref player) = *player_guard {
-            self.runtime.block_on(async {
-                player.set_can_go_next(can_go_next).await?;
-                player.set_can_go_previous(can_go_previous).await;
-                Ok::<(), zbus::Error>(())
-            }).map_err(|e| format!("Failed to update MPRIS actions: {}", e))?;
-        }
-        Ok(())
+    fn set_available_actions(
+        &self,
+        can_go_next: bool,
+        can_go_previous: bool,
+    ) -> Result<(), String> {
+        let sender = self
+            .command_sender
+            .lock()
+            .map_err(|e| format!("Lock error: {}", e))?;
+        sender
+            .send(MprisCommand::SetAvailableActions(
+                can_go_next,
+                can_go_previous,
+            ))
+            .map_err(|e| format!("Failed to send actions command: {}", e))
     }
 }
