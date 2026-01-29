@@ -345,7 +345,10 @@ pub async fn delete_track(state: State<'_, AppState>, track_id: i64) -> Result<(
 #[tauri::command]
 pub async fn delete_tracks(state: State<'_, AppState>, track_ids: Vec<i64>) -> Result<(), String> {
     if track_ids.len() > MAX_BATCH_SIZE {
-        return Err(format!("Cannot delete more than {} tracks at once", MAX_BATCH_SIZE));
+        return Err(format!(
+            "Cannot delete more than {} tracks at once",
+            MAX_BATCH_SIZE
+        ));
     }
     let result = lock_db(&state)?.delete_tracks(&track_ids);
     result.map_err(sanitize_err("Deleting tracks"))
@@ -798,7 +801,10 @@ pub async fn add_tracks_to_playlist(
     track_ids: Vec<i64>,
 ) -> Result<(), String> {
     if track_ids.len() > MAX_BATCH_SIZE {
-        return Err(format!("Cannot add more than {} tracks at once", MAX_BATCH_SIZE));
+        return Err(format!(
+            "Cannot add more than {} tracks at once",
+            MAX_BATCH_SIZE
+        ));
     }
     lock_db(&state)?
         .add_tracks_to_playlist_batch(playlist_id, &track_ids)
