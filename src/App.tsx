@@ -133,17 +133,16 @@ function App() {
         overlay = document.createElement('div');
         overlay.textContent = `${dragTrackIds.length} track${dragTrackIds.length > 1 ? 's' : ''}`;
         overlay.style.cssText =
-          'position:fixed;pointer-events:none;z-index:9999;' +
+          'position:fixed;left:0;top:0;pointer-events:none;z-index:9999;' +
           'padding:6px 12px;background:#6366f1;color:#fff;border-radius:8px;' +
           'font-size:13px;font-weight:600;box-shadow:0 4px 12px rgba(0,0,0,.3);' +
-          'white-space:nowrap;';
+          'white-space:nowrap;will-change:transform;';
         document.body.appendChild(overlay);
         document.body.style.cursor = 'grabbing';
       }
 
       if (overlay) {
-        overlay.style.left = `${e.clientX + 14}px`;
-        overlay.style.top = `${e.clientY + 14}px`;
+        overlay.style.transform = `translate(${e.clientX + 14}px,${e.clientY + 14}px)`;
       }
 
       const el = hitTest(e.clientX, e.clientY);

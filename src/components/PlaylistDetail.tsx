@@ -207,7 +207,7 @@ export default function PlaylistDetail({ playlistId, onBack }: PlaylistDetailPro
 
   const gridTemplate = useMemo(() => {
     const contentCols = visibleColumns.map((col) => `${getColumnWidth(col.id)}px`).join(' ');
-    return `auto auto 2rem ${contentCols} 2.5rem 4rem 2.5rem`;
+    return `1.5rem 1.5rem 2rem ${contentCols} 2.5rem 4rem 2.5rem`;
   }, [visibleColumns, getColumnWidth]);
   const [contextMenu, setContextMenu] = useState<{
     x: number;

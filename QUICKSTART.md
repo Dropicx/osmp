@@ -75,7 +75,10 @@ The built application will be in `src-tauri/target/release/bundle/`
 
 ## Troubleshooting
 
-### App won't start
+### macOS: "OSMP can't be opened" / Gatekeeper blocks the app
+OSMP is not code-signed with an Apple Developer certificate. You are running this at your own risk. To bypass Gatekeeper, run `xattr -cr /Applications/OSMP.app` in Terminal, or right-click the app and choose **Open**. See the [README](README.md#macos-gatekeeper-notice) for full details.
+
+### App won't start (building from source)
 - Make sure you've run `npm install` first
 - Ensure Rust is installed: `rustc --version`
 - Build the frontend: `npm run build`

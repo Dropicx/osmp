@@ -57,10 +57,34 @@ sudo apt-get install -y \
 
 ### Option A – Pre-built (recommended)
 
-- **macOS**: Download the `.dmg` from the latest [GitHub Releases](https://github.com/Dropicx/osmp/releases), open it, and drag OSMP to Applications.
+- **macOS**: Download the `.dmg` from the latest [GitHub Releases](https://github.com/Dropicx/osmp/releases), open it, and drag OSMP to Applications. See [macOS Gatekeeper notice](#macos-gatekeeper-notice) below.
 - **Linux**: Download the `.AppImage` from [Releases](https://github.com/Dropicx/osmp/releases), make it executable (`chmod +x OSMP-*.AppImage`), then run it.
 
 The app can update itself via the in-app updater when new releases are published.
+
+#### macOS Gatekeeper notice
+
+OSMP is not currently code-signed with an Apple Developer certificate. macOS Gatekeeper will block the app the first time you try to open it. **You are running this at your own risk.** To open the app, use one of these methods:
+
+**Option 1 — Remove the quarantine attribute (terminal):**
+
+```bash
+xattr -cr /Applications/OSMP.app
+```
+
+**Option 2 — Right-click to open:**
+
+1. Right-click (or Control-click) the app in Finder
+2. Select **Open** from the context menu
+3. Click **Open** in the confirmation dialog
+
+You only need to do this once. After the first launch, macOS will remember your choice.
+
+**Option 3 — System Settings:**
+
+1. Try to open the app normally (it will be blocked)
+2. Go to **System Settings > Privacy & Security**
+3. Scroll down and click **Open Anyway** next to the OSMP message
 
 ### Option B – From source (macOS and Linux)
 

@@ -612,7 +612,7 @@ export default function Settings() {
                 onChange={(e) =>
                   updateScanSettings({ periodic_scan_interval_minutes: Number(e.target.value) })
                 }
-                className="ml-6 flex-shrink-0 bg-bg-elevated border border-bg-surface text-text-primary rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+                className="ml-6 flex-shrink-0 bg-bg-elevated border border-bg-surface text-text-primary rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 [&>option]:bg-bg-elevated [&>option]:text-text-primary"
               >
                 <option value={15}>Every 15 minutes</option>
                 <option value={30}>Every 30 minutes</option>
