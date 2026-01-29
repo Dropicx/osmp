@@ -37,7 +37,7 @@ export function useAutoUpdate() {
         setState((s) => ({ ...s, status: 'idle' }));
       }
     } catch {
-      // Silently fail on network errors - never block the user
+      // Silently fail — network errors, missing platforms in latest.json, etc.
       setState((s) => ({ ...s, status: 'idle' }));
     }
   }, []);

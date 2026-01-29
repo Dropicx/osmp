@@ -218,8 +218,16 @@ export default function Settings() {
       } else {
         setUpdateCheckStatus('none');
       }
-    } catch {
-      setUpdateCheckStatus('error');
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      // When latest.json has no platforms or no matching platform, the updater
+      // throws rather than returning null. Treat this as "no update available"
+      // since it means signed updater builds aren't configured yet.
+      if (msg.includes('platform') || msg.includes('platforms') || msg.includes('target')) {
+        setUpdateCheckStatus('none');
+      } else {
+        setUpdateCheckStatus('error');
+      }
     }
   };
 
