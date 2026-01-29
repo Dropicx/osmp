@@ -64,7 +64,7 @@ jobs:
         run: npm run type-check
 
       - name: Test with coverage
-        run: npx vitest run --coverage --coverage.thresholds.lines=18 --coverage.thresholds.functions=35 --coverage.thresholds.branches=60
+        run: npx vitest run --coverage --coverage.thresholds.lines=50 --coverage.thresholds.functions=35 --coverage.thresholds.branches=60
 
       - name: Rust format check
         run: cargo fmt --manifest-path src-tauri/Cargo.toml --check
