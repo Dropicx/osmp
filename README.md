@@ -222,7 +222,7 @@ Contributions are welcome. Please feel free to submit a Pull Request.
 
 ## License
 
-This project is available under the [PolyForm Noncommercial 1.0.0](https://polyformproject.org/licenses/noncommercial/1.0.0/) license.
+This project is licensed under the [MIT License](LICENSE).
 
 ## Acknowledgments
 

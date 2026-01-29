@@ -1,8 +1,8 @@
 {
   "name": "osmp",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "Open Source Music Player",
-  "license": "PolyForm-Noncommercial-1.0.0",
+  "license": "MIT",
   "type": "module",
   "scripts": {
     "dev": "vite",
